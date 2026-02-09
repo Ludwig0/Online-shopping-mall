@@ -1,0 +1,51 @@
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+
+<div id="app">
+    <h1>{{ shopTitle }}</h1>
+    
+    <button @click="loadData">Fetch Latest Products</button>
+
+    <div class="product-grid">
+        <div v-for="item in products" :key="item.id" class="card">
+            <img :src="item.img" alt="Product">
+            <h3>{{ item.name }}</h3>
+            <p>Price: ${{ item.price }}</p>
+        </div>
+    </div>
+</div>
+
+<script>
+new Vue({
+    el: '#app',
+    data: {
+        shopTitle: 'AI Smart Mall Demo',
+        products: []
+    },
+    methods: {
+        loadData() {
+            const mockJson = [
+                { id: 1, name: 'Smart Speaker', price: 299, img: 'https://via.placeholder.com/150' },
+                { id: 2, name: 'Mechanical Keyboard', price: 599, img: 'https://via.placeholder.com/150' },
+                { id: 3, name: 'Wireless Mouse', price: 129, img: 'https://via.placeholder.com/150' }
+            ];
+            
+            setTimeout(() => {
+                this.products = mockJson;
+                this.$nextTick(() => { 
+                    this.animateCards(); 
+                });
+            }, 500);
+        },
+        animateCards() {
+            gsap.from(".card", {
+                duration: 1,
+                y: 50,
+                opacity: 0,
+                stagger: 0.2,
+                ease: "power2.out"
+            });
+        }
+    }
+});
+</script>
