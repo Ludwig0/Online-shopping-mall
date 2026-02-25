@@ -1,0 +1,75 @@
+{% extends 'shop/base.html' %}
+{% block content %}
+<h1>Order {{ order.po_number }}</h1>
+
+<div class="detail-panels">
+  <div class="panel">
+    <h3>Order Summary</h3>
+    <p><strong>Purchase date:</strong> {{ order.purchase_date }}</p>
+    <p><strong>Status:</strong> {{ order.get_status_display }}</p>
+    <p><strong>Total amount:</strong> ${{ order.total_amount }}</p>
+    <p><strong>Shipping address:</strong><br>{{ order.shipping_address_snapshot|linebreaksbr }}</p>
+
+    {% if order.hold_at %}<p><strong>Hold date:</strong> {{ order.hold_at }}</p>{% endif %}
+    {% if order.shipped_at %}<p><strong>Shipment date:</strong> {{ order.shipped_at }}</p>{% endif %}
+    {% if order.cancelled_at %}<p><strong>Cancel date:</strong> {{ order.cancelled_at }}</p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Status Actions</h3>
+    {% if is_vendor_view %}
+      <div class="action-row">
+        <form method="post" action="{% url 'admin_order_hold' order.id %}">{% csrf_token %}<button type="submit">Set Hold</button></form>
+        <form method="post" action="{% url 'admin_order_shipped' order.id %}">{% csrf_token %}<button type="submit">Set Shipped</button></form>
+        <form method="post" action="{% url 'admin_order_cancelled' order.id %}">{% csrf_token %}<button type="submit" class="danger-btn">Cancel</button></form>
+      </div>
+    {% else %}
+      {% if order.status == 'pending' or order.status == 'hold' %}
+        <form method="post" action="{% url 'customer_cancel_order' order.id %}">
+          {% csrf_token %}
+          <button type="submit" class="danger-btn">Cancel Order</button>
+        </form>
+      {% else %}
+        <p class="muted">No customer actions available for the current status.</p>
+      {% endif %}
+    {% endif %}
+
+    <h4>Status History</h4>
+    <ul class="log-list">
+      {% for log in order.status_logs.all %}
+        <li>{{ log.changed_at }} — {{ log.from_status|default:'(new)' }} → {{ log.to_status }} {% if log.note %}({{ log.note }}){% endif %}</li>
+      {% empty %}
+        <li>No logs.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<h3>Line Items</h3>
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Configuration</th>
+        <th>SKU</th>
+        <th>Qty</th>
+        <th>Unit Price</th>
+        <th>Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in order.items.all %}
+      <tr>
+        <td>{{ item.product_title_snapshot }}</td>
+        <td>{{ item.variant_summary_snapshot }}</td>
+        <td>{{ item.sku_snapshot }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>${{ item.unit_price_snapshot }}</td>
+        <td>${{ item.subtotal_snapshot }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

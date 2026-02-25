@@ -1,0 +1,68 @@
+{% extends 'shop/base.html' %}
+{% block content %}
+<div class="product-detail">
+  <div class="product-gallery">
+    {% for img in product.images.all %}
+      <img src="{{ img.image_url }}" alt="{{ img.alt_text|default:product.title }}" class="detail-image">
+    {% empty %}
+      <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/300x420?text=No+Image' }}" alt="{{ product.title }}" class="detail-image">
+    {% endfor %}
+  </div>
+
+  <div class="product-info">
+    <h1>{{ product.title }}</h1>
+    <p class="muted">{{ product.authors }}</p>
+    <p><strong>Publisher:</strong> {{ product.publisher|default:"-" }}</p>
+    <p><strong>Published date:</strong> {{ product.published_date|default:"-" }}</p>
+    <p><strong>Category:</strong> {{ product.category|default:"-" }}</p>
+
+    {% if selected_variant %}
+      <p class="price">Price: <strong>${{ selected_variant.effective_price }}</strong></p>
+      <p><strong>SKU:</strong> {{ selected_variant.sku }}</p>
+      <p><strong>Configuration:</strong> {{ selected_variant.config_summary }}</p>
+      <p>
+        <strong>Stock:</strong>
+        {% if selected_variant.is_in_stock %}In stock{% else %}Out of stock{% endif %}
+      </p>
+    {% else %}
+      <p class="price">Price: <strong>${{ product.base_price }}</strong></p>
+      <p class="danger">No SKU configured.</p>
+    {% endif %}
+
+    <div class="description">
+      <h3>Description</h3>
+      <p>{{ product.description|linebreaksbr }}</p>
+    </div>
+
+    {% if product.is_configurable and option %}
+      <div class="config-box">
+        <h3>Choose {{ option.name }}</h3>
+        <div class="option-buttons">
+          {% for value in option.values.all %}
+            <a class="pill {% if selected_variant and selected_variant.variant_values.first.option_value_id == value.id %}active{% endif %}"
+               href="{% url 'product_detail' product.slug %}?format={{ value.id }}">
+              {{ value.value }}
+              {% if value.price_delta > 0 %}(+${{ value.price_delta }}){% endif %}
+            </a>
+          {% endfor %}
+        </div>
+        <p class="muted small">Hardcover adds $5.00.</p>
+      </div>
+    {% endif %}
+
+    {% if user.is_authenticated %}
+      <form method="post" action="{% url 'add_to_cart' product.id %}" class="add-cart-form">
+        {% csrf_token %}
+        {% if selected_variant %}
+          <input type="hidden" name="variant_id" value="{{ selected_variant.id }}">
+        {% endif %}
+        <label>Quantity</label>
+        <input type="number" name="quantity" value="1" min="1" max="99">
+        <button type="submit" {% if not selected_variant or not selected_variant.is_in_stock %}disabled{% endif %}>Add to Cart</button>
+      </form>
+    {% else %}
+      <p><a href="{% url 'login' %}">Login</a> to add items to cart and place orders.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

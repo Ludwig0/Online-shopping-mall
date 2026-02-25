@@ -1,0 +1,53 @@
+{% extends 'shop/base.html' %}
+{% block content %}
+<h1>Admin Portal — {{ mode }} Product</h1>
+
+<form method="post" class="form-card">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" name="save_product">Save Product</button>
+</form>
+
+{% if product %}
+  <h2>Images (Block B1: multiple photos)</h2>
+  <form method="post" class="form-card">
+    {% csrf_token %}
+    {{ formset.management_form }}
+    {% for f in formset %}
+      <div class="nested-form">
+        {{ f.as_p }}
+      </div>
+    {% endfor %}
+    <button type="submit" name="save_images">Save Images</button>
+  </form>
+
+  <h2>Configured SKUs</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Configuration</th>
+          <th>Price</th>
+          <th>Inventory Status</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in product.variants.all %}
+          <tr>
+            <td>{{ v.sku }}</td>
+            <td>{{ v.config_summary }}</td>
+            <td>${{ v.effective_price }}</td>
+            <td>{{ v.get_inventory_status_display }}</td>
+            <td>{{ v.is_default|yesno:"Yes,No" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">No variants configured.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">Variant creation is automated in the import command for dataset records.</p>
+{% endif %}
+{% endblock %}

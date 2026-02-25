@@ -1,0 +1,326 @@
+from decimal import Decimal
+from django.contrib import messages
+from django.contrib.auth import login
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import AuthenticationForm
+from django.core.paginator import Paginator
+from django.db.models import Q
+from django.forms import inlineformset_factory
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
+
+from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm
+from .models import (
+    Product, ProductImage, ProductOption, ProductOptionValue, ProductVariant,
+    ProductVariantSelection, CartItem, PurchaseOrder
+)
+from .services import get_or_create_cart, checkout_cart, transition_order_status
+
+
+def product_list(request):
+    q = request.GET.get('q', '').strip()
+    products = Product.objects.filter(is_active=True).prefetch_related('images', 'variants')
+
+    if q:
+        products = products.filter(
+            Q(title__icontains=q) |
+            Q(authors__icontains=q) |
+            Q(publisher__icontains=q) |
+            Q(description__icontains=q)
+        )
+
+    paginator = Paginator(products.order_by('title'), 16)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'shop/product_list.html', {'page_obj': page_obj, 'q': q})
+
+
+def product_detail(request, slug):
+    product = get_object_or_404(
+        Product.objects.prefetch_related(
+            'images',
+            'options__values',
+            'variants__variant_values__option_value__option'
+        ),
+        slug=slug,
+        is_active=True
+    )
+
+    selected_variant = None
+    selected_value_id = request.GET.get('format')
+    option = product.options.first()
+
+    if product.is_configurable and option:
+        if selected_value_id and selected_value_id.isdigit():
+            selected_variant = (
+                product.variants.filter(variant_values__option_value_id=int(selected_value_id))
+                .distinct().first()
+            )
+        if not selected_variant:
+            selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
+    else:
+        selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
+
+    return render(request, 'shop/product_detail.html', {
+        'product': product,
+        'selected_variant': selected_variant,
+        'option': option,
+    })
+
+
+def register_view(request):
+    if request.user.is_authenticated:
+        return redirect('product_list')
+
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, "Your account has been created.")
+            return redirect('product_list')
+    else:
+        form = RegisterForm()
+
+    return render(request, 'shop/register.html', {'form': form})
+
+
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('product_list')
+
+    form = AuthenticationForm(request, data=request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        login(request, form.get_user())
+        messages.success(request, "Signed in successfully.")
+        return redirect('product_list')
+
+    return render(request, 'shop/login.html', {'form': form})
+
+
+@login_required
+def add_to_cart(request, product_id):
+    if request.method != 'POST':
+        return redirect('product_list')
+
+    product = get_object_or_404(Product, id=product_id, is_active=True)
+    cart = get_or_create_cart(request.user)
+
+    variant_id = request.POST.get('variant_id')
+    quantity_str = request.POST.get('quantity', '1')
+
+    try:
+        quantity = max(1, min(99, int(quantity_str)))
+    except ValueError:
+        quantity = 1
+
+    if variant_id:
+        variant = get_object_or_404(ProductVariant, id=variant_id, product=product)
+    else:
+        variant = product.variants.filter(is_default=True).first() or product.variants.first()
+
+    if not variant:
+        messages.error(request, "No purchasable SKU is configured for this product.")
+        return redirect('product_detail', slug=product.slug)
+
+    if not variant.is_in_stock:
+        messages.error(request, "This configuration is currently out of stock.")
+        return redirect('product_detail', slug=product.slug)
+
+    item, created = CartItem.objects.get_or_create(cart=cart, variant=variant, defaults={'quantity': quantity})
+    if not created:
+        item.quantity = min(99, item.quantity + quantity)
+        item.save(update_fields=['quantity'])
+
+    messages.success(request, "Item added to cart.")
+    return redirect('cart_detail')
+
+
+@login_required
+def cart_detail(request):
+    cart = get_or_create_cart(request.user)
+    items = cart.items.select_related('variant__product').all()
+    forms = {item.id: CartQuantityForm(initial={'quantity': item.quantity}) for item in items}
+    return render(request, 'shop/cart_detail.html', {'cart': cart, 'items': items, 'forms': forms})
+
+
+@login_required
+def cart_update_item(request, item_id):
+    if request.method != 'POST':
+        return redirect('cart_detail')
+
+    cart = get_or_create_cart(request.user)
+    item = get_object_or_404(CartItem, id=item_id, cart=cart)
+    form = CartQuantityForm(request.POST)
+    if form.is_valid():
+        item.quantity = form.cleaned_data['quantity']
+        item.save(update_fields=['quantity'])
+        messages.success(request, "Cart updated.")
+    else:
+        messages.error(request, "Invalid quantity.")
+    return redirect('cart_detail')
+
+
+@login_required
+def cart_remove_item(request, item_id):
+    if request.method == 'POST':
+        cart = get_or_create_cart(request.user)
+        item = get_object_or_404(CartItem, id=item_id, cart=cart)
+        item.delete()
+        messages.success(request, "Item removed from cart.")
+    return redirect('cart_detail')
+
+
+@login_required
+def checkout_view(request):
+    if request.method != 'POST':
+        return redirect('cart_detail')
+
+    try:
+        order = checkout_cart(request.user)
+        messages.success(request, f"Order created: {order.po_number}")
+        return redirect('order_detail', order_id=order.id)
+    except ValueError as e:
+        messages.error(request, str(e))
+        return redirect('cart_detail')
+
+
+@login_required
+def order_list(request):
+    status = request.GET.get('status', '').strip()
+    orders = PurchaseOrder.objects.filter(customer=request.user).prefetch_related('items')
+
+    if status:
+        orders = orders.filter(status=status)
+
+    return render(request, 'shop/order_list.html', {
+        'orders': orders,
+        'status': status,
+        'status_choices': PurchaseOrder.STATUS_CHOICES,
+    })
+
+
+@login_required
+def order_detail(request, order_id):
+    order = get_object_or_404(
+        PurchaseOrder.objects.prefetch_related('items', 'status_logs'),
+        id=order_id,
+        customer=request.user
+    )
+    return render(request, 'shop/order_detail.html', {'order': order, 'is_vendor_view': False})
+
+
+@login_required
+def customer_cancel_order(request, order_id):
+    if request.method != 'POST':
+        return redirect('order_list')
+    order = get_object_or_404(PurchaseOrder, id=order_id, customer=request.user)
+    try:
+        transition_order_status(order, PurchaseOrder.STATUS_CANCELLED, actor='customer')
+        messages.success(request, "Order cancelled.")
+    except ValueError as e:
+        messages.error(request, str(e))
+    return redirect('order_detail', order_id=order.id)
+
+
+# -----------------------------
+# Admin portal (basic spec: no auth required)
+# -----------------------------
+
+def admin_product_list(request):
+    q = request.GET.get('q', '').strip()
+    products = Product.objects.prefetch_related('variants').all()
+
+    if q:
+        products = products.filter(
+            Q(title__icontains=q) |
+            Q(slug__icontains=q) |
+            Q(variants__sku__icontains=q)
+        ).distinct()
+
+    return render(request, 'shop/admin/product_list.html', {'products': products.order_by('title'), 'q': q})
+
+
+def admin_product_create(request):
+    if request.method == 'POST':
+        form = ProductForm(request.POST)
+        if form.is_valid():
+            product = form.save()
+            messages.success(request, "Product created.")
+            return redirect('admin_product_edit', product_id=product.id)
+    else:
+        form = ProductForm()
+
+    return render(request, 'shop/admin/product_form.html', {'form': form, 'mode': 'Create'})
+
+
+def admin_product_edit(request, product_id):
+    product = get_object_or_404(Product.objects.prefetch_related('images', 'variants', 'options__values'), id=product_id)
+
+    ImageFormSet = inlineformset_factory(Product, ProductImage, form=ProductImageForm, extra=1, can_delete=True)
+
+    if request.method == 'POST':
+        if 'save_product' in request.POST:
+            form = ProductForm(request.POST, instance=product)
+            formset = ImageFormSet(instance=product)
+            if form.is_valid():
+                form.save()
+                messages.success(request, "Product saved.")
+                return redirect('admin_product_edit', product_id=product.id)
+        elif 'save_images' in request.POST:
+            form = ProductForm(instance=product)
+            formset = ImageFormSet(request.POST, instance=product)
+            if formset.is_valid():
+                formset.save()
+                messages.success(request, "Images updated.")
+                return redirect('admin_product_edit', product_id=product.id)
+        else:
+            form = ProductForm(instance=product)
+            formset = ImageFormSet(instance=product)
+    else:
+        form = ProductForm(instance=product)
+        formset = ImageFormSet(instance=product)
+
+    return render(request, 'shop/admin/product_form.html', {
+        'form': form,
+        'formset': formset,
+        'product': product,
+        'mode': 'Edit'
+    })
+
+
+def admin_product_toggle_active(request, product_id):
+    if request.method == 'POST':
+        product = get_object_or_404(Product, id=product_id)
+        product.is_active = not product.is_active
+        product.save(update_fields=['is_active'])
+        messages.success(request, f"Product {'enabled' if product.is_active else 'disabled'}.")
+    return redirect('admin_product_list')
+
+
+def admin_order_list(request):
+    status = request.GET.get('status', '').strip()
+    orders = PurchaseOrder.objects.select_related('customer').all()
+    if status:
+        orders = orders.filter(status=status)
+    return render(request, 'shop/admin/order_list.html', {
+        'orders': orders,
+        'status': status,
+        'status_choices': PurchaseOrder.STATUS_CHOICES
+    })
+
+
+def admin_order_detail(request, order_id):
+    order = get_object_or_404(PurchaseOrder.objects.prefetch_related('items', 'status_logs'), id=order_id)
+    return render(request, 'shop/order_detail.html', {'order': order, 'is_vendor_view': True})
+
+
+def admin_order_change_status(request, order_id, new_status):
+    if request.method != 'POST':
+        return redirect('admin_order_detail', order_id=order_id)
+    order = get_object_or_404(PurchaseOrder, id=order_id)
+    try:
+        transition_order_status(order, new_status, actor='vendor')
+        messages.success(request, "Order status updated.")
+    except ValueError as e:
+        messages.error(request, str(e))
+    return redirect('admin_order_detail', order_id=order.id)
