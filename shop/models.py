@@ -239,3 +239,19 @@ class OrderStatusLog(models.Model):
 
     def __str__(self):
         return f"{self.order.po_number}: {self.from_status} -> {self.to_status}"
+
+class CustomerReview(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='customer_reviews')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='customer_reviews')
+
+    rating = models.PositiveSmallIntegerField()  # 1-5
+    review_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        unique_together = ('product', 'user')  # one review per user per product
+
+    def __str__(self):
+        return f"{self.product.title} - {self.user.username} ({self.rating})"

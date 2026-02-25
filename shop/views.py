@@ -9,13 +9,22 @@ from django.forms import inlineformset_factory
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm
+from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm, CustomerReviewForm
 from .models import (
     Product, ProductImage, ProductOption, ProductOptionValue, ProductVariant,
-    ProductVariantSelection, CartItem, PurchaseOrder
+    ProductVariantSelection, CartItem, PurchaseOrder, CustomerReview
 )
 from .services import get_or_create_cart, checkout_cart, transition_order_status
 
+def user_has_purchased_product(user, product):
+    if not user.is_authenticated:
+        return False
+    return PurchaseOrder.objects.filter(
+        customer=user,
+        items__product=product
+    ).exclude(
+        status=PurchaseOrder.STATUS_CANCELLED
+    ).exists()
 
 def product_list(request):
     q = request.GET.get('q', '').strip()
@@ -39,7 +48,9 @@ def product_detail(request, slug):
         Product.objects.prefetch_related(
             'images',
             'options__values',
-            'variants__variant_values__option_value__option'
+            'variants__variant_values__option_value__option',
+            'imported_reviews',
+            'customer_reviews__user',
         ),
         slug=slug,
         is_active=True
@@ -60,11 +71,56 @@ def product_detail(request, slug):
     else:
         selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
 
+    can_review = user_has_purchased_product(request.user, product)
+    existing_customer_review = None
+    review_form = None
+
+    if request.user.is_authenticated:
+        existing_customer_review = CustomerReview.objects.filter(product=product, user=request.user).first()
+        if can_review:
+            review_form = CustomerReviewForm(instance=existing_customer_review)
+
+    imported_reviews = product.imported_reviews.all()[:10]  # display first 10 imported reviews
+    customer_reviews = product.customer_reviews.select_related('user').all()
+
     return render(request, 'shop/product_detail.html', {
         'product': product,
         'selected_variant': selected_variant,
         'option': option,
+        'imported_reviews': imported_reviews,
+        'customer_reviews': customer_reviews,
+        'can_review': can_review,
+        'existing_customer_review': existing_customer_review,
+        'review_form': review_form,
     })
+
+@login_required
+def submit_product_review(request, product_id):
+    if request.method != 'POST':
+        return redirect('product_list')
+
+    product = get_object_or_404(Product, id=product_id, is_active=True)
+
+    if not user_has_purchased_product(request.user, product):
+        messages.error(request, "Only customers who purchased this product can submit a review.")
+        return redirect('product_detail', slug=product.slug)
+
+    existing_review = CustomerReview.objects.filter(product=product, user=request.user).first()
+    form = CustomerReviewForm(request.POST, instance=existing_review)
+
+    if form.is_valid():
+        review = form.save(commit=False)
+        review.product = product
+        review.user = request.user
+        review.save()
+        if existing_review:
+            messages.success(request, "Your review has been updated.")
+        else:
+            messages.success(request, "Your review has been submitted.")
+    else:
+        messages.error(request, "Invalid review form. Please check your rating and review text.")
+
+    return redirect('product_detail', slug=product.slug)
 
 
 def register_view(request):

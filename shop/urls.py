@@ -7,6 +7,7 @@ urlpatterns = [
     # Storefront
     path('', views.product_list, name='product_list'),
     path('product/<slug:slug>/', views.product_detail, name='product_detail'),
+    path('product/<int:product_id>/review/', views.submit_product_review, name='submit_product_review'),
 
     # Auth
     path('register/', views.register_view, name='register'),

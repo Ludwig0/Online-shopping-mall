@@ -1,8 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import UserCreationForm
-from .models import CustomerProfile, Product, ProductImage, ProductVariant
-
+from .models import CustomerProfile, Product, ProductImage, ProductVariant, CustomerReview
 
 class RegisterForm(UserCreationForm):
     full_name = forms.CharField(max_length=200)
@@ -49,3 +48,12 @@ class VariantStockForm(forms.ModelForm):
     class Meta:
         model = ProductVariant
         fields = ['inventory_status', 'is_default']
+
+class CustomerReviewForm(forms.ModelForm):
+    class Meta:
+        model = CustomerReview
+        fields = ['rating', 'review_text']
+        widgets = {
+            'rating': forms.Select(choices=[(i, str(i)) for i in range(1, 6)]),
+            'review_text': forms.Textarea(attrs={'rows': 4, 'placeholder': 'Write your review here...'}),
+        }
