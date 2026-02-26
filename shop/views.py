@@ -7,6 +7,8 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.forms import inlineformset_factory
 from django.http import Http404
+from django.utils import timezone
+from .models import OrderStatusLog
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm, CustomerReviewForm
@@ -29,16 +31,25 @@ def user_has_purchased_product(user, product):
 def product_list(request):
     q = request.GET.get('q', '').strip()
     products = Product.objects.filter(is_active=True).prefetch_related('images', 'variants')
-
+    
     if q:
-        products = products.filter(
-            Q(title__icontains=q) |
-            Q(authors__icontains=q) |
-            Q(publisher__icontains=q) |
-            Q(description__icontains=q)
-        )
-
-    paginator = Paginator(products.order_by('title'), 16)
+        from django.db.models import Case, When, Value, IntegerField
+        
+        products = products.annotate(
+            relevance=Case(
+                When(title__icontains=q, then=Value(3)),
+                When(authors__icontains=q, then=Value(2)),
+                When(publisher__icontains=q, then=Value(1)),
+                When(description__icontains=q, then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField()
+            )
+        ).filter(relevance__gt=0).order_by('-relevance', 'title')
+        
+    else:
+        products = products.order_by('title')
+    
+    paginator = Paginator(products, 16)
     page_obj = paginator.get_page(request.GET.get('page'))
     return render(request, 'shop/product_list.html', {'page_obj': page_obj, 'q': q})
 
@@ -276,6 +287,25 @@ def customer_cancel_order(request, order_id):
     except ValueError as e:
         messages.error(request, str(e))
     return redirect('order_detail', order_id=order.id)
+
+@login_required
+def order_pay(request, order_id):
+    order = get_object_or_404(PurchaseOrder, id=order_id, customer=request.user)
+    
+    if order.status == 'pending':
+        order.status = 'paid'
+        order.paid_at = timezone.now()
+        order.save()
+        
+        OrderStatusLog.objects.create(
+            order=order,
+            from_status='pending',
+            to_status='paid',
+            note='Payment completed'
+        )
+        messages.success(request, 'Payment successful!')
+    
+    return redirect('order_detail', order_id)
 
 
 # -----------------------------

@@ -25,7 +25,7 @@ urlpatterns = [
     path('orders/', views.order_list, name='order_list'),
     path('orders/<int:order_id>/', views.order_detail, name='order_detail'),
     path('orders/<int:order_id>/cancel/', views.customer_cancel_order, name='customer_cancel_order'),
-
+    path('order/<int:order_id>/pay/', views.order_pay, name='order_pay'),
     # Admin portal (basic spec allows no authentication)
     path('admin-portal/products/', views.admin_product_list, name='admin_product_list'),
     path('admin-portal/products/create/', views.admin_product_create, name='admin_product_create'),

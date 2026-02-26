@@ -5,30 +5,58 @@
   <title>BookStore Demo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="/static/css/site.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
 </head>
 <body>
   <header class="topbar">
     <div class="container topbar-inner">
       <a href="{% url 'product_list' %}" class="brand">BookStore</a>
-        <nav class="nav">
+      
+      <nav class="nav">
         <a href="{% url 'product_list' %}" class="nav-btn">Shop</a>
         <a href="{% url 'admin_product_list' %}" class="nav-btn">Admin Portal</a>
 
         {% if user.is_authenticated %}
-            <a href="{% url 'order_list' %}" class="nav-btn">My Orders</a>
-            <a href="{% url 'cart_detail' %}" class="nav-btn cart-btn">
-            Cart ({{ nav_cart_count }})
-            </a>
+          <a href="{% url 'order_list' %}" class="nav-btn">Orders</a>
+          
+          <a href="{% url 'cart_detail' %}" class="nav-btn">
+            <i class="fas fa-shopping-cart"></i>
+            {% if nav_cart_count > 0 %}
+              <span class="cart-badge">{{ nav_cart_count }}</span>
+            {% endif %}
+          </a>
 
-            <form method="post" action="{% url 'logout' %}" class="inline-form">
-            {% csrf_token %}
-            <button type="submit" class="nav-btn danger-nav-btn">Logout</button>
-            </form>
+          <!-- 鼠标悬停头像显示菜单 -->
+          <div class="dropdown">
+            <button class="avatar-btn">
+              <img src="https://www.gravatar.com/avatar/?d=mp" alt="Avatar" class="avatar-img">
+            </button>
+            
+            <div class="dropdown-menu">
+              <div class="dropdown-header">
+                {{ user.email }}
+              </div>
+              
+              <a href="{% url 'order_list' %}" class="dropdown-item">Orders</a>
+              
+              <!-- Addresses 先指向首页 -->
+              <a href="{% url 'product_list' %}" class="dropdown-item">Addresses</a>
+              
+              <form method="post" action="{% url 'logout' %}" style="margin:0;">
+                {% csrf_token %}
+                <button type="submit" class="dropdown-item text-danger" style="width:100%; text-align:left; background:none; border:none;">
+                  <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+              </form>
+            </div>
+          </div>
+
         {% else %}
-            <a href="{% url 'login' %}" class="nav-btn">Login</a>
-            <a href="{% url 'register' %}" class="nav-btn primary-nav-btn">Register</a>
+          <a href="{% url 'login' %}" class="nav-btn">Login</a>
+          <a href="{% url 'register' %}" class="nav-btn primary-nav-btn">Register</a>
         {% endif %}
-        </nav>
+      </nav>
     </div>
   </header>
 
