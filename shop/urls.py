@@ -31,6 +31,7 @@ urlpatterns = [
     path('admin-portal/products/create/', views.admin_product_create, name='admin_product_create'),
     path('admin-portal/products/<int:product_id>/edit/', views.admin_product_edit, name='admin_product_edit'),
     path('admin-portal/products/<int:product_id>/toggle/', views.admin_product_toggle_active, name='admin_product_toggle_active'),
+    path('admin-portal/variants/<int:variant_id>/toggle-stock/', views.admin_variant_toggle_stock, name='admin_variant_toggle_stock'),
 
     path('admin-portal/orders/', views.admin_order_list, name='admin_order_list'),
     path('admin-portal/orders/<int:order_id>/', views.admin_order_detail, name='admin_order_detail'),

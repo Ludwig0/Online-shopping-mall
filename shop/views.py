@@ -380,3 +380,19 @@ def admin_order_change_status(request, order_id, new_status):
     except ValueError as e:
         messages.error(request, str(e))
     return redirect('admin_order_detail', order_id=order.id)
+
+def admin_variant_toggle_stock(request, variant_id):
+    if request.method != 'POST':
+        return redirect('admin_product_list')
+
+    variant = get_object_or_404(ProductVariant.objects.select_related('product'), id=variant_id)
+
+    if variant.inventory_status == 'in_stock':
+        variant.inventory_status = 'out_of_stock'
+    else:
+        variant.inventory_status = 'in_stock'
+
+    variant.save(update_fields=['inventory_status'])
+    messages.success(request, f"Inventory updated: {variant.sku} is now {variant.get_inventory_status_display()}.")
+
+    return redirect('admin_product_edit', product_id=variant.product_id)

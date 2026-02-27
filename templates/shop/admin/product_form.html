@@ -31,6 +31,7 @@
           <th>Price</th>
           <th>Inventory Status</th>
           <th>Default</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -41,9 +42,17 @@
             <td>${{ v.effective_price }}</td>
             <td>{{ v.get_inventory_status_display }}</td>
             <td>{{ v.is_default|yesno:"Yes,No" }}</td>
+            <td>
+              <form method="post" action="{% url 'admin_variant_toggle_stock' v.id %}" class="inline-form">
+                {% csrf_token %}
+                <button type="submit">
+                  {% if v.inventory_status == 'in_stock' %}Mark Out of Stock{% else %}Mark In Stock{% endif %}
+                </button>
+              </form>
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="5">No variants configured.</td></tr>
+          <tr><td colspan="6">No variants configured.</td></tr>
         {% endfor %}
       </tbody>
     </table>
