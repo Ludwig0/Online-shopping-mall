@@ -3,3 +3,10 @@
 *.npy
 *.bin
 *.joblib
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.vscode/
+.idea/
