@@ -10,6 +10,7 @@ from django.http import Http404
 from django.utils import timezone
 from .models import OrderStatusLog
 from django.shortcuts import get_object_or_404, redirect, render
+from .services import get_or_create_cart, checkout_cart, transition_order_status, Word2VecRecommendationService
 
 from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm, CustomerReviewForm
 from .models import (
@@ -51,7 +52,22 @@ def product_list(request):
     
     paginator = Paginator(products, 16)
     page_obj = paginator.get_page(request.GET.get('page'))
-    return render(request, 'shop/product_list.html', {'page_obj': page_obj, 'q': q})
+       # ===== Bestsellers and New Arrivals =====
+    try:
+        rec_service = Word2VecRecommendationService()
+
+        bestsellers = rec_service.get_bestsellers(top_k=5)
+        new_arrivals = rec_service.get_new_arrivals(top_k=6) 
+    except Exception as e:
+        print(f"Recommendation error: {e}")
+        bestsellers = []
+        new_arrivals = []
+    return render(request, 'shop/product_list.html', {
+        'page_obj': page_obj,
+        'q': q,
+        'bestsellers': bestsellers,
+        'new_arrivals': new_arrivals,
+        })
 
 
 def product_detail(request, slug):
@@ -93,7 +109,14 @@ def product_detail(request, slug):
 
     imported_reviews = product.imported_reviews.all()[:10]  # display first 10 imported reviews
     customer_reviews = product.customer_reviews.select_related('user').all()
-
+# ===== Word2Vec Recommendations =====
+    try:
+        rec_service = Word2VecRecommendationService()
+        similar_products = rec_service.get_similar_products(product, top_k=5)
+    except Exception as e:
+        print(f"Recommendation error: {e}")
+        similar_products = []
+    # ====================================
     return render(request, 'shop/product_detail.html', {
         'product': product,
         'selected_variant': selected_variant,
@@ -103,6 +126,7 @@ def product_detail(request, slug):
         'can_review': can_review,
         'existing_customer_review': existing_customer_review,
         'review_form': review_form,
+        'similar_products': similar_products,
     })
 
 @login_required
@@ -207,7 +231,16 @@ def cart_detail(request):
     cart = get_or_create_cart(request.user)
     items = cart.items.select_related('variant__product').all()
     forms = {item.id: CartQuantityForm(initial={'quantity': item.quantity}) for item in items}
-    return render(request, 'shop/cart_detail.html', {'cart': cart, 'items': items, 'forms': forms})
+    # ===== Cart Recommendations =====
+    try:
+        rec_service = Word2VecRecommendationService()
+        cart_recommendations = rec_service.get_cart_recommendations(cart, top_k=5)
+    except Exception as e:
+        print(f"Cart recommendation error: {e}")
+        cart_recommendations = []
+    # ================================
+    return render(request, 'shop/cart_detail.html', {
+        'cart': cart, 'items': items, 'forms': forms, 'cart_recommendations': cart_recommendations})
 
 
 @login_required
@@ -287,25 +320,6 @@ def customer_cancel_order(request, order_id):
     except ValueError as e:
         messages.error(request, str(e))
     return redirect('order_detail', order_id=order.id)
-
-@login_required
-def order_pay(request, order_id):
-    order = get_object_or_404(PurchaseOrder, id=order_id, customer=request.user)
-    
-    if order.status == 'pending':
-        order.status = 'paid'
-        order.paid_at = timezone.now()
-        order.save()
-        
-        OrderStatusLog.objects.create(
-            order=order,
-            from_status='pending',
-            to_status='paid',
-            note='Payment completed'
-        )
-        messages.success(request, 'Payment successful!')
-    
-    return redirect('order_detail', order_id)
 
 
 # -----------------------------

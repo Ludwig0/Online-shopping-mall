@@ -53,4 +53,27 @@
 {% else %}
   <p>Your cart is empty.</p>
 {% endif %}
+
+
+{% if cart_recommendations %}
+<div class="recommendation-section">
+    <h2>🛒 You Might Also Like</h2>
+    <div class="grid">
+        {% for product in cart_recommendations %}
+            {% if product.slug %}
+            <div class="card"> 
+                <a href="{% url 'product_detail' product.slug %}" class="card-image-wrap">
+                    <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/200x280?text=No+Image' }}" alt="{{ product.title }}" class="card-image">
+                </a>
+                <div class="card-body">
+                    <h3 class="card-title"><a href="{% url 'product_detail' product.slug %}">{{ product.title|truncatechars:30 }}</a></h3>
+                    <div class="muted">{{ product.authors|truncatechars:30 }}</div>
+                    <div class="price">${{ product.display_price }}</div>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}

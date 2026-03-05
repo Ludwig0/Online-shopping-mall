@@ -94,6 +94,28 @@
     {% endif %}
   </div>
 </div>
+<!-- ===== similar products recommendation ===== -->
+{% if similar_products %}
+<div class="recommendation-section">
+    <h2>📚 Similar Products You Might Like</h2>
+    <div class="grid">
+        {% for product in similar_products %}
+            {% if product.slug %}
+            <div class="card"> 
+                <a href="{% url 'product_detail' product.slug %}" class="card-image-wrap">
+                    <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/200x280?text=No+Image' }}" alt="{{ product.title }}" class="card-image">
+                </a>
+                <div class="card-body">
+                    <h3 class="card-title"><a href="{% url 'product_detail' product.slug %}">{{ product.title|truncatechars:30 }}</a></h3>
+                    <div class="muted">{{ product.authors|truncatechars:30 }}</div>
+                    <div class="price">${{ product.display_price }}</div>
+                </div>
+            </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 <div class="review-sections">
   <div class="review-panel">
     <h2>Customer Reviews</h2>

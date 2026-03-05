@@ -88,3 +88,136 @@ def transition_order_status(order, new_status, actor='vendor'):
     order.save()
     OrderStatusLog.objects.create(order=order, from_status=old_status, to_status=new_status, note=f'By {actor}')
     return order
+
+# ==================== Word2Vec Recommendation Service ====================
+
+import numpy as np
+import joblib
+import os
+from django.db.models import Q, Avg, Count
+from .models import Product, BookReview, CartItem, PurchaseOrderItem
+
+class Word2VecRecommendationService:
+    """Word2Vec-based recommendation system"""
+    
+    def __init__(self):
+        self.model = None
+        self.product_ids = []
+        self.similarity_matrix = None
+        self.product_vectors = None
+        self.model_path = 'shop/ml_models/word2vec_recommendation.pkl'
+        self._load_model()
+    
+    def _load_model(self):
+        """Load trained model from disk"""
+        if os.path.exists(self.model_path):
+            try:
+                data = joblib.load(self.model_path)
+                self.model = data.get('word2vec_model')
+                self.product_ids = data.get('product_ids', [])
+                self.similarity_matrix = data.get('similarity_matrix')
+                self.product_vectors = data.get('product_vectors')
+                print(f"Loaded Word2Vec model with {len(self.product_ids)} products")
+            except Exception as e:
+                print(f"Error loading model: {e}")
+                self.model = None
+    
+    def get_similar_products(self, product, top_k=5):
+        """Get similar products based on Word2Vec semantic similarity"""
+        if not self.model or not self.product_ids:
+            return self._get_fallback_recommendations(top_k)
+        
+        try:
+            # Find product index in the matrix
+            if product.id not in self.product_ids:
+                return self._get_category_recommendations(product, top_k)
+            
+            idx = self.product_ids.index(product.id)
+            
+            # Get similarity scores for this product
+            sim_scores = list(enumerate(self.similarity_matrix[idx]))
+            
+            # Sort by similarity score (descending)
+            sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+            
+            # Skip the product itself, take top_k
+            sim_scores = sim_scores[1:top_k+1]
+            
+            # Get recommended products
+            similar_products = []
+            for i, score in sim_scores:
+                try:
+                    p = Product.objects.get(id=self.product_ids[i], is_active=True)
+                    p.similarity_score = score  # Store score for display
+                    similar_products.append(p)
+                except Product.DoesNotExist:
+                    continue
+            
+            return similar_products
+            
+        except Exception as e:
+            print(f"Error getting similar products: {e}")
+            return self._get_category_recommendations(product, top_k)
+    
+    def get_bestsellers(self, top_k=10):
+        """Get best-selling products based on average review score and review count"""
+        from django.db.models import Avg, Count
+    
+        bestseller_products = []
+        product_stats = BookReview.objects.values('product').annotate(
+            avg_rating=Avg('score'),
+            review_count=Count('id')
+        ).order_by('-avg_rating', '-review_count')[:top_k]
+    
+        product_ids = [item['product'] for item in product_stats]
+        if product_ids:
+            products = Product.objects.filter(id__in=product_ids, is_active=True)
+            product_dict = {p.id: p for p in products}
+            bestseller_products = [product_dict[pid] for pid in product_ids if pid in product_dict]
+    
+        return bestseller_products
+    
+    def get_new_arrivals(self, top_k=10):
+        """Get newly added products"""
+        return list(Product.objects.filter(
+            is_active=True
+        ).order_by('-created_at')[:top_k])
+    
+    def get_cart_recommendations(self, cart, top_k=5):
+        """Get recommendations based on items in user's cart"""
+        if not cart or not cart.items.exists():
+            return self.get_bestsellers(top_k)
+        
+        # Get categories from cart items
+        categories = cart.items.values_list(
+            'variant__product__category', flat=True
+        ).distinct()
+        
+        # Get product IDs already in cart
+        cart_product_ids = cart.items.values_list(
+            'variant__product_id', flat=True
+        )
+        
+        # Recommend products from same categories
+        recommendations = Product.objects.filter(
+            category__in=categories,
+            is_active=True
+        ).exclude(
+            id__in=cart_product_ids
+        ).order_by('?')[:top_k]
+        
+        return list(recommendations)
+ 
+    def _get_category_recommendations(self, product, top_k=5):
+        """Fallback: category-based recommendations when model fails"""
+        return list(Product.objects.filter(
+            category=product.category,
+            is_active=True
+        ).exclude(id=product.id)[:top_k])
+    
+    def _get_fallback_recommendations(self, top_k=5):
+        """Fallback: random products when no model available"""
+        products = list(Product.objects.filter(is_active=True))
+        import random
+        random.shuffle(products)
+        return products[:top_k]

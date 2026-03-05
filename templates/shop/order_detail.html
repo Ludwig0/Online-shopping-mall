@@ -24,15 +24,6 @@
         <form method="post" action="{% url 'admin_order_cancelled' order.id %}">{% csrf_token %}<button type="submit" class="danger-btn">Cancel</button></form>
       </div>
     {% else %}
-        {% if order.status == 'pending' %}
-      <div class="action-row" style="margin-bottom: 15px;">
-        <form method="post" action="{% url 'order_pay' order.id %}">
-          {% csrf_token %}
-          <button type="submit" style="background: #2563eb; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%;">
-            💳 Pay Now
-          </button>
-        </form>
-      </div>
     {% endif %}
       {% if order.status == 'pending' or order.status == 'hold' %}
         <form method="post" action="{% url 'customer_cancel_order' order.id %}">
@@ -41,7 +32,6 @@
         </form>
       {% else %}
         <p class="muted">No customer actions available for the current status.</p>
-      {% endif %}
     {% endif %}
 
     <h4>Status History</h4>

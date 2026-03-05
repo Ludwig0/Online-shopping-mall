@@ -517,3 +517,21 @@ button:disabled { background: #9ca3af; cursor: not-allowed; }
 .danger-nav-btn:hover {
   background: #b91c1c;
 }
+
+.recommendation-section {
+    margin-bottom: 32px;
+}
+
+.recommendation-section h2 {
+    font-size: 1.5rem;
+    margin: 0 0 16px 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e5e7eb;
+    color: #1f2937;
+}
+
+.recommendation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+}
