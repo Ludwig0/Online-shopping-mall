@@ -572,3 +572,24 @@ button:disabled { background: #9ca3af; cursor: not-allowed; }
     background: #f1f1f1;
     border-radius: 4px;
 }
+
+.errorlist {
+    color: #dc3545;
+    list-style: none;
+    padding-left: 0;
+    font-size: 0.9rem;
+    margin: 5px 0;
+}
+
+.helptext.error {
+    color: #dc3545;
+}
+
+.errorlist li {
+    color: #dc3545;
+    margin-bottom: 3px;
+}
+
+#id_password2_error {
+    color: #dc3545 !important;
+}
