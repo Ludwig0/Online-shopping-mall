@@ -111,6 +111,11 @@ body {
 }
 .nav a:hover, .link-btn:hover { color: #fff; }
 
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -528,10 +533,4 @@ button:disabled { background: #9ca3af; cursor: not-allowed; }
     padding-bottom: 8px;
     border-bottom: 2px solid #e5e7eb;
     color: #1f2937;
-}
-
-.recommendation-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 16px;
 }

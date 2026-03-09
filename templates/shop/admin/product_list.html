@@ -2,7 +2,10 @@
 {% block content %}
 <div class="page-header">
   <h1>Admin Portal — Products</h1>
-  <a href="{% url 'admin_product_create' %}" class="button-link">Add Product</a>
+  <div class="header-actions">
+    <a href="{% url 'admin_order_list' %}" class="button-link">Orders</a>
+    <a href="{% url 'admin_product_create' %}" class="button-link">Add Product</a>
+  </div>
 </div>
 
 <form method="get" class="search-row">
