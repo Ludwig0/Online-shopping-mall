@@ -50,7 +50,7 @@ body {
   display: block;
   padding: 10px 16px;
   text-decoration: none;
-  color: #000000;
+  color: #000000 !important;
 }
 .dropdown-item:hover {
   background-color: #f5f5f5;
@@ -59,10 +59,13 @@ body {
   padding: 10px 16px;
   border-bottom: 1px solid #eee;
   font-size: 0.9rem;
-  color: #666;
+  color: #000000;
 }
 .text-danger {
   color: #dc3545;
+}
+.dropdown-item.text-danger {
+    color: #dc3545 !important;
 }
 .cart-badge {
   background-color: #dc3545;
@@ -111,11 +114,6 @@ body {
 }
 .nav a:hover, .link-btn:hover { color: #fff; }
 
-.header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -533,4 +531,44 @@ button:disabled { background: #9ca3af; cursor: not-allowed; }
     padding-bottom: 8px;
     border-bottom: 2px solid #e5e7eb;
     color: #1f2937;
+}
+
+.scroll-container {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding: 10px 0 20px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+
+.scroll-container .recommendation-grid {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 16px;
+    width: max-content;
+}
+
+.scroll-container .recommendation-grid .card {
+    width: 200px;  
+    flex-shrink: 0;  
+}
+
+.scroll-container::-webkit-scrollbar {
+    height: 8px;
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.scroll-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.scroll-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
 }

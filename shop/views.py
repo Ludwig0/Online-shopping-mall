@@ -56,7 +56,7 @@ def product_list(request):
     try:
         rec_service = Word2VecRecommendationService()
 
-        bestsellers = rec_service.get_bestsellers(top_k=5)
+        bestsellers = rec_service.get_bestsellers(top_k=30)
         new_arrivals = rec_service.get_new_arrivals(top_k=6) 
     except Exception as e:
         print(f"Recommendation error: {e}")

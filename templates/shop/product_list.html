@@ -2,8 +2,9 @@
 {% block content %}
 {% if bestsellers %}
 <div class="recommendation-section">
-    <h2>📚 Bestsellers</h2>
-    <div class="grid">
+    <h2>🏆Bestsellers</h2>
+    <div class="scroll-container">
+    <div class="recommendation-grid">
         {% for product in bestsellers %}
             {% if product.slug %}
             <div class="card"> 
@@ -19,7 +20,9 @@
             {% endif %}
         {% endfor %}
     </div>
+    </div>
 </div>
+
 {% endif %}
 <div class="page-header">
   <h1>Books</h1>
