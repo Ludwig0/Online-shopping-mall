@@ -1,8 +1,10 @@
 from decimal import Decimal
+from email.mime import text
 from django.db import transaction
 from django.utils import timezone
+from numpy.ma import product
 from .models import Cart, CartItem, PurchaseOrder, PurchaseOrderItem, OrderStatusLog
-
+import numpy as np
 
 def get_or_create_cart(user):
     cart, _ = Cart.objects.get_or_create(customer=user)
@@ -117,6 +119,7 @@ class Word2VecRecommendationService:
                 self.product_ids = data.get('product_ids', [])
                 self.similarity_matrix = data.get('similarity_matrix')
                 self.product_vectors = data.get('product_vectors')
+                self.vector_size = data.get('vector_size', 100)
                 print(f"Loaded Word2Vec model with {len(self.product_ids)} products")
             except Exception as e:
                 print(f"Error loading model: {e}")
@@ -221,3 +224,52 @@ class Word2VecRecommendationService:
         import random
         random.shuffle(products)
         return products[:top_k]
+    
+    def add_new_product(self, product):
+        """Add a new product to the recommendation model without full retraining"""
+        text = f"{product.title} {product.description} {product.authors} {product.category} {product.publisher}"
+        words = text.lower().split()
+
+        word_vectors = []
+        for word in words:
+            if word in self.model.wv:
+                word_vectors.append(self.model.wv[word])
+
+        if word_vectors:
+            new_vector = np.mean(word_vectors, axis=0)
+        else:
+            new_vector = np.zeros(self.vector_size)
+
+        self.product_vectors = np.vstack([self.product_vectors, new_vector])
+        self.product_ids.append(product.id)
+
+        new_normalized = new_vector / np.linalg.norm(new_vector)
+        old_normalized = self.product_vectors[:-1] / np.linalg.norm(self.product_vectors[:-1], axis=1, keepdims=True)
+        new_similarities = np.dot(old_normalized, new_normalized)
+
+        new_row = np.append(new_similarities, 1.0)  
+        self.similarity_matrix = np.vstack([self.similarity_matrix, new_row[:-1]])  # 加行
+        self.similarity_matrix = np.column_stack([self.similarity_matrix, new_row])  # 加列
+
+        self._save_model()
+
+        return True
+
+
+    def _save_model(self):
+        """Save the current model to disk"""
+        import joblib
+        import os
+
+        os.makedirs('shop/ml_models', exist_ok=True)
+
+        model_data = {
+            'word2vec_model': self.model,
+            'product_vectors': self.product_vectors,
+            'product_ids': self.product_ids,
+            'similarity_matrix': self.similarity_matrix,
+            'vector_size': self.vector_size
+    }
+
+        joblib.dump(model_data, self.model_path)
+        print(f"Model saved to {self.model_path}")
