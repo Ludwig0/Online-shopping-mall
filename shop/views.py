@@ -4,7 +4,7 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, Avg, Count
 from django.forms import inlineformset_factory
 from django.http import Http404
 from django.utils import timezone
@@ -114,7 +114,14 @@ def product_detail(request, slug):
             review_form = CustomerReviewForm(instance=existing_customer_review)
 
     imported_reviews = product.imported_reviews.all()[:10]  # display first 10 imported reviews
-    customer_reviews = product.customer_reviews.select_related('user').all()
+
+    # Use only real customer reviews (not imported ones) to compute rating stats.
+    # Limit the reviews fetched for display to keep page load fast.
+    customer_reviews = CustomerReview.objects.filter(product=product).select_related('user').order_by('-created_at')[:10]
+    rating_stats = CustomerReview.objects.filter(product=product).aggregate(avg=Avg('rating'), count=Count('id'))
+    customer_avg_rating = rating_stats.get('avg') or 0
+    customer_review_count = rating_stats.get('count') or 0
+
 # ===== Word2Vec Recommendations =====
     try:
         rec_service = Word2VecRecommendationService()
@@ -129,6 +136,8 @@ def product_detail(request, slug):
         'option': option,
         'imported_reviews': imported_reviews,
         'customer_reviews': customer_reviews,
+        'customer_avg_rating': customer_avg_rating,
+        'customer_review_count': customer_review_count,
         'can_review': can_review,
         'existing_customer_review': existing_customer_review,
         'review_form': review_form,
