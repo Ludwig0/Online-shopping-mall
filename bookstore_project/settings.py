@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'replace-this-in-real-project'
-DEBUG = True
-ALLOWED_HOSTS = []
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'replace-this-in-real-project')
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
+ALLOWED_HOSTS = [host for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost').split(',') if host]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -88,6 +89,15 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 SESSION_COOKIE_HTTPONLY = True  
+SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_AGE = 604800  
 SESSION_SAVE_EVERY_REQUEST = True 
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False 
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW = 300
+LOGIN_LOCKOUT_SECONDS = 300

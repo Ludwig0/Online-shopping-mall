@@ -22,7 +22,9 @@
 
   
         <a href="{% url 'product_list' %}" class="nav-btn">Shop</a>
-        <a href="{% url 'admin_product_list' %}" class="nav-btn">Admin Portal</a>
+        {% if perms.shop.view_product or perms.shop.add_product or perms.shop.change_product or perms.shop.view_purchaseorder or perms.shop.change_purchaseorder %}
+          <a href="{% url 'admin_product_list' %}" class="nav-btn">Admin Portal</a>
+        {% endif %}
 
         {% if user.is_authenticated %}
           <a href="{% url 'order_list' %}" class="nav-btn">Orders</a>
@@ -33,30 +35,13 @@
               <span class="cart-badge">{{ nav_cart_count }}</span>
             {% endif %}
           </a>
-          
-          <div class="dropdown">
-            <button class="avatar-btn">
-              <img src="https://www.gravatar.com/avatar/?d=mp" alt="Avatar" class="avatar-img">
-            </button>
-            
-            <div class="dropdown-menu">
-              <div class="dropdown-header">
-                {{ user.email }}
-              </div>
-              
-              <a href="{% url 'order_list' %}" class="dropdown-item">Orders</a>
-              
 
-              <a href="{% url 'product_list' %}" class="dropdown-item">Addresses</a>
-              
-              <form method="post" action="{% url 'logout' %}" style="margin:0;">
-                {% csrf_token %}
-                <button type="submit" class="dropdown-item text-danger" style="width:100%; text-align:left; background:none; border:none;">
-                  <i class="fas fa-sign-out-alt"></i> Logout
-                </button>
-              </form>
-            </div>
-          </div>
+          <form method="post" action="{% url 'logout' %}" style="margin:0;">
+            {% csrf_token %}
+            <button type="submit" class="nav-btn danger-nav-btn">
+              <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
+          </form>
 
         {% else %}
           <a href="{% url 'login' %}" class="nav-btn">Login</a>

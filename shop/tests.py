@@ -1,6 +1,8 @@
 from django.test import TestCase, Client
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
 from django.urls import reverse
+from django.core.cache import cache
+from django.test import override_settings
 from .models import CustomerProfile, Product, Cart, PurchaseOrder, CustomerReview,ProductVariant, PurchaseOrderItem 
 from .services import Word2VecRecommendationService
 
@@ -288,3 +290,85 @@ class ReviewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'rating')
         self.assertContains(response, 'review_text')
+
+
+class AdminPortalSecurityTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='portaluser',
+            password='portalpass123'
+        )
+        self.product = Product.objects.create(
+            title='Portal Test Book',
+            slug='portal-test-book',
+            base_price=12.00,
+            is_active=True,
+            is_configurable=False
+        )
+        ProductVariant.objects.create(
+            product=self.product,
+            sku=f"TEST-PORTAL-{self.product.id}",
+            price_delta=0,
+            inventory_status='in_stock',
+            is_default=True
+        )
+        self.order = PurchaseOrder.objects.create(
+            po_number='PORTAL-ORDER-001',
+            customer=self.user,
+            customer_name_snapshot='Portal User',
+            shipping_address_snapshot='123 Portal Street',
+            status='pending',
+            total_amount=12.00
+        )
+
+    def test_admin_portal_redirects_anonymous_users_to_login(self):
+        response = self.client.get('/admin-portal/products/')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response.url)
+
+    def test_admin_portal_forbids_logged_in_users_without_permissions(self):
+        self.client.login(username='portaluser', password='portalpass123')
+        response = self.client.get('/admin-portal/products/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_portal_allows_users_with_assigned_permissions(self):
+        self.user.user_permissions.add(
+            Permission.objects.get(codename='view_product'),
+            Permission.objects.get(codename='add_product'),
+            Permission.objects.get(codename='change_product'),
+            Permission.objects.get(codename='view_purchaseorder'),
+            Permission.objects.get(codename='change_purchaseorder'),
+        )
+        self.client.login(username='portaluser', password='portalpass123')
+
+        product_response = self.client.get('/admin-portal/products/')
+        order_response = self.client.get('/admin-portal/orders/')
+
+        self.assertEqual(product_response.status_code, 200)
+        self.assertEqual(order_response.status_code, 200)
+
+
+@override_settings(
+    LOGIN_FAILURE_LIMIT=2,
+    LOGIN_FAILURE_WINDOW=60,
+    LOGIN_LOCKOUT_SECONDS=60,
+)
+class LoginRateLimitTest(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='ratelimituser',
+            password='correctpass123'
+        )
+
+    def test_login_is_temporarily_blocked_after_repeated_failures(self):
+        self.client.post('/login/', {'username': 'ratelimituser', 'password': 'wrong-pass'})
+        self.client.post('/login/', {'username': 'ratelimituser', 'password': 'wrong-pass'})
+
+        response = self.client.post('/login/', {'username': 'ratelimituser', 'password': 'correctpass123'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Too many failed login attempts')
+        self.assertNotIn('_auth_user_id', self.client.session)

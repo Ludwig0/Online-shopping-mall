@@ -11,6 +11,12 @@ from django.utils import timezone
 from .models import OrderStatusLog
 from django.shortcuts import get_object_or_404, redirect, render
 from .services import get_or_create_cart, checkout_cart, transition_order_status, Word2VecRecommendationService
+from .security import (
+    clear_failed_logins,
+    get_login_lockout_remaining,
+    portal_permissions_required,
+    register_failed_login,
+)
 
 from .forms import RegisterForm, CartQuantityForm, ProductForm, ProductImageForm, VariantStockForm, CustomerReviewForm
 from .models import (
@@ -180,10 +186,23 @@ def login_view(request):
         return redirect('product_list')
 
     form = AuthenticationForm(request, data=request.POST or None)
-    if request.method == 'POST' and form.is_valid():
-        login(request, form.get_user())
-        messages.success(request, "Signed in successfully.")
-        return redirect('product_list')
+    if request.method == 'POST':
+        username = request.POST.get('username', '')
+        remaining = get_login_lockout_remaining(request, username)
+
+        if remaining > 0:
+            minutes = max(1, remaining // 60)
+            form.add_error(None, f"Too many failed login attempts. Try again in about {minutes} minute(s).")
+        elif form.is_valid():
+            login(request, form.get_user())
+            clear_failed_logins(request, username)
+            messages.success(request, "Signed in successfully.")
+            return redirect('product_list')
+        else:
+            blocked_for = register_failed_login(request, username)
+            if blocked_for:
+                minutes = max(1, blocked_for // 60)
+                form.add_error(None, f"Too many failed login attempts. Try again in about {minutes} minute(s).")
 
     return render(request, 'shop/login.html', {'form': form})
 
@@ -326,6 +345,7 @@ def customer_cancel_order(request, order_id):
 # Admin portal (basic spec: no auth required)
 # -----------------------------
 
+@portal_permissions_required('shop.view_product')
 def admin_product_list(request):
     q = request.GET.get('q', '').strip()
     products = Product.objects.prefetch_related('variants').all()
@@ -340,6 +360,7 @@ def admin_product_list(request):
     return render(request, 'shop/admin/product_list.html', {'products': products.order_by('title'), 'q': q})
 
 
+@portal_permissions_required('shop.add_product')
 def admin_product_create(request):
     if request.method == 'POST':
         form = ProductForm(request.POST)
@@ -353,6 +374,7 @@ def admin_product_create(request):
     return render(request, 'shop/admin/product_form.html', {'form': form, 'mode': 'Create'})
 
 
+@portal_permissions_required('shop.change_product')
 def admin_product_edit(request, product_id):
     product = get_object_or_404(Product.objects.prefetch_related('images', 'variants', 'options__values'), id=product_id)
 
@@ -388,6 +410,7 @@ def admin_product_edit(request, product_id):
     })
 
 
+@portal_permissions_required('shop.change_product')
 def admin_product_toggle_active(request, product_id):
     if request.method == 'POST':
         product = get_object_or_404(Product, id=product_id)
@@ -397,6 +420,7 @@ def admin_product_toggle_active(request, product_id):
     return redirect('admin_product_list')
 
 
+@portal_permissions_required('shop.view_purchaseorder')
 def admin_order_list(request):
     status = request.GET.get('status', '').strip()
     orders = PurchaseOrder.objects.select_related('customer').all()
@@ -409,11 +433,13 @@ def admin_order_list(request):
     })
 
 
+@portal_permissions_required('shop.view_purchaseorder')
 def admin_order_detail(request, order_id):
     order = get_object_or_404(PurchaseOrder.objects.prefetch_related('items', 'status_logs'), id=order_id)
     return render(request, 'shop/order_detail.html', {'order': order, 'is_vendor_view': True})
 
 
+@portal_permissions_required('shop.change_purchaseorder')
 def admin_order_change_status(request, order_id, new_status):
     if request.method != 'POST':
         return redirect('admin_order_detail', order_id=order_id)

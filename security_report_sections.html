@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Security Report Sections</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      margin: 0;
+      font-family: "Times New Roman", Georgia, serif;
+      color: #111827;
+      background: #f3f4f6;
+    }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      padding: 14px 16px;
+      background: #111827;
+    }
+    .toolbar button {
+      border: none;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      color: #fff;
+      background: #2563eb;
+    }
+    .toolbar button.secondary {
+      background: #374151;
+    }
+    .page {
+      width: min(900px, 92%);
+      margin: 24px auto 40px;
+      background: #fff;
+      padding: 48px 56px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.08);
+      line-height: 1.6;
+    }
+    h1, h2, h3 {
+      font-weight: 700;
+      margin: 0 0 14px;
+      color: #111827;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 22px;
+      margin-top: 28px;
+    }
+    h3 {
+      font-size: 18px;
+      margin-top: 18px;
+    }
+    p {
+      margin: 0 0 14px;
+      text-align: justify;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 22px;
+      font-size: 15px;
+    }
+    th, td {
+      border: 1px solid #374151;
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #f3f4f6;
+      font-weight: 700;
+    }
+    .lead {
+      color: #4b5563;
+      margin-bottom: 22px;
+    }
+    .code {
+      margin: 14px 0 18px;
+      padding: 12px 14px;
+      background: #f8fafc;
+      border: 1px solid #d1d5db;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    @media print {
+      body {
+        background: #fff;
+      }
+      .toolbar {
+        display: none;
+      }
+      .page {
+        width: 100%;
+        margin: 0;
+        box-shadow: none;
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="exportToWord('security-report-sections')">Export To Word</button>
+    <button class="secondary" onclick="window.print()">Print / Save PDF</button>
+  </div>
+
+  <div class="page" id="report-content">
+    <h1>Supplementary Report Text</h1>
+    <p class="lead">Prepared for insertion into Chapter 3 and Chapter 4 of the final report. The writing style follows the existing report structure and focuses only on the newly completed Block Z content.</p>
+
+    <h2>3.3 Implemented Features of the Specification</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Block</th>
+          <th>Completion Status and Relevant Sections</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Z</td>
+          <td>The system implements web application security through authenticated and permission-controlled access to the admin portal, login rate limiting against brute-force attacks, CSRF-protected state-changing forms, and basic deployment hardening in Django settings. More information can be found in Section 3.5: Security – Requirements Analysis, Section 4.6: Web application security, and Chapter 6: Security.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3.5 Security – Requirements Analysis</h2>
+    <h3>3.5.1 Security Scope and Rationale</h3>
+    <p>Web application security was treated as a non-functional requirement that cuts across almost every major function of the online bookstore. The system stores account information, shopping carts, order records, and user-generated reviews, and it also exposes privileged catalogue and order-management functions for administrative use. As a result, the security requirement was not limited to one isolated page or feature. Instead, it had to be analysed as a set of cross-cutting controls that protect the confidentiality of account data, the integrity of business operations, and the availability and trustworthiness of the platform.</p>
+    <h3>3.5.2 Access Control and Authentication Requirements</h3>
+    <p>From the customer perspective, the most important expectation is that ordinary users can browse, purchase, and review books without being exposed to unauthorized account access or manipulation of their orders. From the vendor and administrator perspective, the system must ensure that sensitive management operations, such as updating products and changing order status, are available only to explicitly authorized accounts. These concerns led to a primary requirement of access control: public storefront functionality should remain available to normal registered users, while administrative operations must be protected by authentication and permission checks. In practical terms, this means the normal registration flow should create only ordinary customer accounts, and any staff-like operational privilege must be granted separately by an authorized administrator.</p>
+    <p>A second requirement arose from the login mechanism itself. Because the platform is publicly reachable through a standard web login form, repeated password guessing attempts represent a realistic risk even in a small-scale deployment. Therefore, the authentication flow should not simply accept unlimited retries. The system should detect repeated failed logins within a short time window and temporarily block further attempts. This requirement is important not only for security in the strict sense, but also for the overall trustworthiness of the shopping platform, since account compromise would directly affect order history, addresses, and review ownership.</p>
+    <h3>3.5.3 Input Protection and Configuration Requirements</h3>
+    <p>A third requirement concerns the secure handling of state-changing requests and user input. The project contains multiple forms that modify server-side state, including login, add-to-cart, checkout, review submission, logout, and admin actions. These interactions require protection against common web risks such as CSRF and unsafe input handling. In this project, the requirement was defined as consistent use of server-side validation, CSRF-safe form submission, and safe rendering of user-generated text. Although Django provides many of these protections by default, they still form part of the analysed requirement because the system design depends on them and because the team must ensure they are applied consistently across all relevant pages.</p>
+    <p>Finally, the deployment configuration itself introduces security requirements. Hard-coded secrets, permissive debug settings, or missing browser-side protections can weaken an otherwise well-structured application. For that reason, the security analysis also included configuration hardening as a requirement. Sensitive values should be overridable by environment variables, and safer defaults should be applied to cookies and response headers. Taken together, these requirements define Block Z for the current project scope: role-restricted administrative access, brute-force resistance at login, safe handling of state-changing requests, and essential security-oriented application configuration.</p>
+
+    <h2>4.6 Web application security</h2>
+    <h3>4.6.1 Permission-Controlled Admin Portal</h3>
+    <p>The implementation of web application security in the current system follows a practical secure-by-design approach rather than relying on a single mechanism. The first and most visible measure is role-restricted access to the custom admin portal. Earlier in development, the bookstore's product and order management pages were directly reachable as normal application URLs. This created a clear authorization risk, because those pages expose business-critical actions such as editing products and changing order status. To address this, the final implementation keeps the existing customer registration process unchanged and instead provisions privileged access through Django's permission system. In operational terms, a superuser can grant the relevant permissions in <em>django-admin</em> to selected accounts, allowing those accounts to act as vendor or staff users without turning all registrants into administrators.</p>
+    <p>At code level, a dedicated permission decorator was introduced in <em>shop/security.py</em>. This decorator first checks whether the user is authenticated and then verifies that the account holds the required Django model permissions before allowing the view to continue. It is applied to the product-management and order-management views in the admin portal, so authorization is enforced server-side rather than only through UI visibility. The navigation bar was also adjusted to hide the admin portal link from users who do not possess the corresponding permissions, improving usability while leaving the real security decision to the backend.</p>
+    <div class="code">def portal_permissions_required(*perms):
+    def decorator(view_func):
+        def _wrapped_view(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return redirect_to_login(request.get_full_path())
+            if request.user.is_superuser or request.user.has_perms(perms):
+                return view_func(request, *args, **kwargs)
+            raise PermissionDenied(...)
+        return _wrapped_view
+    return decorator</div>
+    <h3>4.6.2 Brute-Force Resistance in the Login Flow</h3>
+    <p>The second major measure is protection against brute-force login attempts. A lightweight rate-limiting mechanism was implemented in the same security module using Django's cache interface. The mechanism derives a cache key from the client IP address and the submitted username, records repeated failures within a configurable time window, and temporarily locks further attempts once the threshold is exceeded. In the current configuration, five failed login attempts within five minutes trigger a five-minute lockout. This was integrated directly into the login view so that the system checks the lockout state before accepting further authentication attempts and clears the failure record after a successful login.</p>
+    <div class="code">LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW = 300
+LOGIN_LOCKOUT_SECONDS = 300</div>
+    <p>This measure was chosen because it is proportionate to the scale of the project: it meaningfully reduces repeated credential guessing while keeping the implementation small, understandable, and maintainable. The mechanism is intentionally server-side and does not depend on client-side JavaScript, which preserves its effectiveness regardless of browser behavior.</p>
+    <h3>4.6.3 Configuration Hardening and Supporting Controls</h3>
+    <p>The third part of the implementation is security hardening in Django settings. The application now reads <em>SECRET_KEY</em>, <em>DEBUG</em>, and <em>ALLOWED_HOSTS</em> from environment variables with safe local fallbacks, reducing the risk of shipping development settings directly into deployment. Additional browser-side protections were enabled through cookie and header settings, including <em>SESSION_COOKIE_SAMESITE</em>, <em>CSRF_COOKIE_SAMESITE</em>, <em>CSRF_COOKIE_HTTPONLY</em>, <em>SECURE_CONTENT_TYPE_NOSNIFF</em>, and <em>X_FRAME_OPTIONS</em>. These changes do not replace application-level authorization or validation, but they tighten the security baseline and reduce exposure to common cross-site and browser-behavior risks.</p>
+    <p>It is also important to note that some protections are inherited from Django and deliberately retained as part of the implementation strategy. State-changing forms continue to use CSRF tokens and Django's CSRF middleware. Authentication is handled through Django's built-in auth framework, and most data-access logic relies on the Django ORM rather than raw SQL, which helps reduce injection risk. User-generated review text is rendered through standard template escaping rather than unsafe HTML output. Thus, the final security implementation is a combination of framework-supported controls and project-specific hardening for the risks most relevant to this bookstore application.</p>
+    <p>The completed implementation was supported by focused security-oriented tests. Test cases were added to verify that anonymous users are redirected away from the admin portal, authenticated but unauthorized users receive a denial response, authorized users can access the protected pages, and repeated failed logins lead to temporary lockout. These checks do not constitute a full penetration test, but they provide evidence that the designed controls are active and functioning as intended in the implemented system.</p>
+  </div>
+
+  <script>
+    function exportToWord(filename) {
+      const content = document.getElementById('report-content').innerHTML;
+      const html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:w="urn:schemas-microsoft-com:office:word"
+              xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+          <meta charset="utf-8">
+          <title>${filename}</title>
+          <style>
+            body { font-family: "Times New Roman", serif; line-height: 1.6; color: #111; }
+            h1, h2, h3 { color: #111; }
+            table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+            th, td { border: 1px solid #444; padding: 8px 10px; vertical-align: top; text-align: left; }
+            th { background: #f0f0f0; }
+            .code { font-family: Consolas, "Courier New", monospace; white-space: pre-wrap; border: 1px solid #bbb; padding: 10px; }
+          </style>
+        </head>
+        <body>${content}</body></html>`;
+
+      const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${filename}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>

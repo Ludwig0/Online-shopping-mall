@@ -43,7 +43,7 @@ body {
   display: none;
   z-index: 1000;
 }
-.dropdown:hover .dropdown-menu {
+.dropdown:focus-within .dropdown-menu {
   display: block;
 }
 .dropdown-item {

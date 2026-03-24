@@ -27,6 +27,15 @@ class Product(models.Model):
 
     is_active = models.BooleanField(default=True)
     is_configurable = models.BooleanField(default=False)
+    is_duplicate = models.BooleanField(default=False, help_text='Whether this product is a duplicate')
+    master_product = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='duplicates',
+        help_text='Reference to the master version',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
