@@ -28,6 +28,8 @@
 
         {% if user.is_authenticated %}
           <a href="{% url 'order_list' %}" class="nav-btn">Orders</a>
+
+          <span class="nav-btn">{{ user.username }}</span>
           
           <a href="{% url 'cart_detail' %}" class="nav-btn">
             <i class="fas fa-shopping-cart"></i>
