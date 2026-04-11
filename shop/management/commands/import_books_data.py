@@ -5,7 +5,6 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.utils.text import slugify
 
 from shop.models import (
     Product, ProductImage,
@@ -22,16 +21,6 @@ class Command(BaseCommand):
         parser.add_argument('--books', default='books.csv')
         parser.add_argument('--ratings', default='ratings.csv')
         parser.add_argument('--reset', action='store_true')
-
-    def _unique_slug(self, base):
-        base_slug = slugify(base)[:280] or "book"
-        slug = base_slug
-        i = 2
-        while Product.objects.filter(slug=slug).exists():
-            suffix = f"-{i}"
-            slug = f"{base_slug[:300-len(suffix)]}{suffix}"
-            i += 1
-        return slug
 
     def _safe_price(self, raw):
         try:
@@ -81,11 +70,9 @@ class Command(BaseCommand):
                     category = raw_categories[:255]
 
                 base_price = self._safe_price(row.get('price', 0))
-                slug = self._unique_slug(title)
 
                 product = Product.objects.create(
                     title=title,
-                    slug=slug,
                     description=(row.get('description') or '').strip(),
                     authors=', '.join(ast.literal_eval(row.get('authors', '[]'))) if row.get('authors') else '',
                     publisher=(row.get('publisher') or '').strip(),

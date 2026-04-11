@@ -1,0 +1,324 @@
+{% extends 'shop/base.html' %}
+{% block content %}
+<div class="chat-page-shell" data-history-url="{% url 'product_chat_history' product.slug %}" data-stream-url="{% url 'product_chat_stream' product.slug %}" data-clear-url="{% url 'product_chat_clear' product.slug %}" data-authenticated="{% if user.is_authenticated %}true{% else %}false{% endif %}">
+  <input type="hidden" id="ai-chat-page-csrf" value="{{ csrf_token }}">
+  <div class="chat-page-layout">
+    <section class="chat-page-main">
+      <div class="chat-page-header">
+        <div>
+          <div class="chat-page-eyebrow">AI Book Guide</div>
+          <h1>Talk About This Book</h1>
+          <p class="muted">Ask for a summary, reading advice, themes, style, or whether this book fits your interests.</p>
+        </div>
+        <a href="{% url 'product_detail' product.slug %}" class="button-link">Back to Product</a>
+      </div>
+
+      <div class="chat-surface">
+        <div class="chat-thread" id="chat-thread">
+          {% if not user.is_authenticated %}
+            <div class="chat-message assistant">
+              <div class="chat-avatar">AI</div>
+              <div class="chat-bubble">Login first to save and continue your book conversations.</div>
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="chat-composer-wrap">
+          <button type="button" class="secondary-btn small-btn" id="chat-clear-btn" {% if not user.is_authenticated %}disabled{% endif %}>Clear Chat</button>
+          <form id="chat-form" class="chat-composer">
+            <textarea id="chat-input" placeholder="Ask anything about this book..." {% if not user.is_authenticated %}disabled{% endif %}></textarea>
+            <button type="submit" id="chat-send-btn" {% if not user.is_authenticated %}disabled{% endif %}>Send</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <aside class="chat-page-side">
+      <div class="book-side-card">
+        <div class="book-side-gallery">
+          <div class="book-side-main-frame">
+            <button type="button" class="book-side-nav prev" id="book-side-prev" aria-label="Previous image">&#10094;</button>
+            <img id="book-side-main-image" src="{{ product.primary_image_url }}" alt="{{ product.title }}">
+            <button type="button" class="book-side-nav next" id="book-side-next" aria-label="Next image">&#10095;</button>
+          </div>
+          <div class="book-side-counter" id="book-side-counter">1 / {{ product.images.count|default:1 }}</div>
+          <div id="book-side-image-data" hidden>
+            {% for img in product.images.all %}
+              <span data-image="{{ img.effective_image_url }}" data-alt="{{ img.alt_text|default:product.title }}"></span>
+            {% empty %}
+              <span data-image="{{ product.primary_image_url }}" data-alt="{{ product.title }}"></span>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="book-side-info">
+          <h2>{{ product.title }}</h2>
+          <p class="muted">{{ product.authors|default:"Unknown author" }}</p>
+          <div class="book-meta-list">
+            <div><strong>Product ID:</strong> {{ product.product_id }}</div>
+            <div><strong>Publisher:</strong> {{ product.publisher|default:"-" }}</div>
+            <div><strong>Published:</strong> {{ product.published_date|default:"-" }}</div>
+            <div><strong>Category:</strong> {{ product.category|default:"-" }}</div>
+          </div>
+          <div class="book-side-description">
+            <h3>Description</h3>
+            <p>{{ product.description|default:"No description available."|linebreaksbr }}</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const shell = document.querySelector('.chat-page-shell');
+  if (!shell) {
+    return;
+  }
+
+  const historyUrl = shell.dataset.historyUrl;
+  const streamUrl = shell.dataset.streamUrl;
+  const clearUrl = shell.dataset.clearUrl;
+  const isAuthenticated = shell.dataset.authenticated === 'true';
+  const csrfToken = document.getElementById('ai-chat-page-csrf').value;
+  const thread = document.getElementById('chat-thread');
+  const form = document.getElementById('chat-form');
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send-btn');
+  const clearBtn = document.getElementById('chat-clear-btn');
+  const prevImageBtn = document.getElementById('book-side-prev');
+  const nextImageBtn = document.getElementById('book-side-next');
+  const imageCounter = document.getElementById('book-side-counter');
+  const mainImage = document.getElementById('book-side-main-image');
+  const imageNodes = Array.from(document.querySelectorAll('#book-side-image-data span'));
+  const images = imageNodes.map(function(node) {
+    return {
+      src: node.dataset.image,
+      alt: node.dataset.alt
+    };
+  });
+  let currentImageIndex = 0;
+
+  function renderSideImage() {
+    if (!images.length) {
+      return;
+    }
+    const currentImage = images[currentImageIndex];
+    mainImage.src = currentImage.src;
+    mainImage.alt = currentImage.alt;
+    imageCounter.textContent = (currentImageIndex + 1) + ' / ' + images.length;
+  }
+
+  if (prevImageBtn && nextImageBtn) {
+    prevImageBtn.addEventListener('click', function() {
+      currentImageIndex = (currentImageIndex - 1 + images.length) % images.length;
+      renderSideImage();
+    });
+    nextImageBtn.addEventListener('click', function() {
+      currentImageIndex = (currentImageIndex + 1) % images.length;
+      renderSideImage();
+    });
+    renderSideImage();
+  }
+
+  function scrollToBottom() {
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function createMessage(role, content) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-message ' + role;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'chat-avatar';
+    avatar.textContent = role === 'assistant' ? 'AI' : 'You';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.textContent = content;
+
+    wrapper.appendChild(avatar);
+    wrapper.appendChild(bubble);
+    return wrapper;
+  }
+
+  function renderMessages(messages) {
+    thread.innerHTML = '';
+    if (!messages.length) {
+      const emptyState = createMessage('assistant', 'Chat history is empty. Ask your first question about this book.');
+      thread.appendChild(emptyState);
+      scrollToBottom();
+      return;
+    }
+
+    messages.forEach(function(message) {
+      thread.appendChild(createMessage(message.role, message.content));
+    });
+    scrollToBottom();
+  }
+
+  async function parseJsonSafely(response) {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(response.ok ? 'The server returned an unexpected response.' : 'The server returned an HTML error page instead of JSON.');
+    }
+  }
+
+  async function loadHistory() {
+    if (!isAuthenticated) {
+      return;
+    }
+    thread.innerHTML = '';
+    thread.appendChild(createMessage('assistant', 'Loading your AI book guide...'));
+    try {
+      const response = await fetch(historyUrl, {
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      const data = await parseJsonSafely(response);
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load chat history.');
+      }
+      renderMessages(data.messages || []);
+    } catch (error) {
+      thread.innerHTML = '';
+      thread.appendChild(createMessage('assistant', error.message));
+    }
+  }
+
+  function setComposerDisabled(disabled) {
+    if (!isAuthenticated) {
+      return;
+    }
+    input.disabled = disabled;
+    sendBtn.disabled = disabled;
+    clearBtn.disabled = disabled;
+  }
+
+  clearBtn.addEventListener('click', async function() {
+    try {
+      setComposerDisabled(true);
+      const response = await fetch(clearUrl, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrfToken,
+          'Accept': 'application/json',
+        },
+      });
+      const data = await parseJsonSafely(response);
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to clear chat history.');
+      }
+      renderMessages([]);
+    } catch (error) {
+      thread.appendChild(createMessage('assistant', error.message));
+      scrollToBottom();
+    } finally {
+      setComposerDisabled(false);
+      input.focus();
+    }
+  });
+
+  form.addEventListener('submit', async function(event) {
+    event.preventDefault();
+    const message = input.value.trim();
+    if (!message) {
+      return;
+    }
+
+    const userNode = createMessage('user', message);
+    const assistantNode = createMessage('assistant', '');
+    const assistantBubble = assistantNode.querySelector('.chat-bubble');
+
+    thread.appendChild(userNode);
+    thread.appendChild(assistantNode);
+    scrollToBottom();
+
+    input.value = '';
+    setComposerDisabled(true);
+
+    try {
+      const response = await fetch(streamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
+        body: JSON.stringify({ message: message }),
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!response.ok) {
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          throw new Error(data.error || 'Unable to send message.');
+        }
+        const text = await response.text();
+        throw new Error(text.startsWith('<!DOCTYPE') ? 'The server returned an HTML error page. Please check the backend log.' : 'Unable to send message.');
+      }
+
+      if (!contentType.includes('text/event-stream')) {
+        const text = await response.text();
+        throw new Error(text.startsWith('<!DOCTYPE') ? 'The server returned an HTML page instead of a stream.' : 'Unexpected response type from chat stream.');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const result = await reader.read();
+        if (result.done) {
+          break;
+        }
+
+        buffer += decoder.decode(result.value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop();
+
+        for (const eventBlock of events) {
+          const dataLine = eventBlock.split('\n').find(function(line) {
+            return line.startsWith('data:');
+          });
+          if (!dataLine) {
+            continue;
+          }
+
+          let payload;
+          try {
+            payload = JSON.parse(dataLine.slice(5).trim());
+          } catch (error) {
+            continue;
+          }
+
+          if (payload.type === 'delta') {
+            assistantBubble.textContent += payload.content;
+            scrollToBottom();
+          } else if (payload.type === 'error') {
+            throw new Error(payload.message || 'Streaming failed.');
+          }
+        }
+      }
+
+      if (!assistantBubble.textContent.trim()) {
+        assistantBubble.textContent = 'No response was generated.';
+      }
+    } catch (error) {
+      assistantBubble.textContent = error.message;
+    } finally {
+      setComposerDisabled(false);
+      input.focus();
+      scrollToBottom();
+    }
+  });
+
+  if (isAuthenticated) {
+    loadHistory();
+  }
+});
+</script>
+{% endblock %}

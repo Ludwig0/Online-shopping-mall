@@ -7,6 +7,11 @@ urlpatterns = [
     # Storefront
     path('', views.product_list, name='product_list'),
     path('product/<slug:slug>/', views.product_detail, name='product_detail'),
+    path('product/<slug:slug>/ai-chat/', views.product_ai_chat_page, name='product_ai_chat_page'),
+    path('product/<slug:slug>/ai-chat/history/', views.product_chat_history, name='product_chat_history'),
+    path('product/<slug:slug>/ai-chat/message/', views.product_chat_send, name='product_chat_send'),
+    path('product/<slug:slug>/ai-chat/stream/', views.product_chat_stream, name='product_chat_stream'),
+    path('product/<slug:slug>/ai-chat/clear/', views.product_chat_clear, name='product_chat_clear'),
     path('product/<int:product_id>/review/', views.submit_product_review, name='submit_product_review'),
 
     # Auth

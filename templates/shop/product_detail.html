@@ -6,9 +6,9 @@
     <button class="carousel-prev">&#10094;</button>
     <div class="carousel-images">
       {% for img in product.images.all %}
-        <img src="{{ img.image_url }}" alt="{{ img.alt_text|default:product.title }}" class="carousel-slide {% if forloop.first %}active{% endif %}">
+        <img src="{{ img.effective_image_url }}" alt="{{ img.alt_text|default:product.title }}" class="carousel-slide {% if forloop.first %}active{% endif %}">
       {% empty %}
-        <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/300x420?text=No+Image' }}" alt="{{ product.title }}" class="carousel-slide active">
+        <img src="{{ product.primary_image_url }}" alt="{{ product.title }}" class="carousel-slide active">
       {% endfor %}
     </div>
     <button class="carousel-next">&#10095;</button>
@@ -22,8 +22,14 @@
 </div>
 
   <div class="product-info">
-    <h1>{{ product.title }}</h1>
-    <p class="muted">{{ product.authors }}</p>
+    <div class="product-info-head">
+      <div>
+        <h1>{{ product.title }}</h1>
+        <p class="muted">{{ product.authors }}</p>
+      </div>
+      <a href="{% url 'product_ai_chat_page' product.slug %}" class="product-ai-entry" aria-label="Open AI book guide">AI</a>
+    </div>
+    <p class="muted"><strong>Product ID:</strong> {{ product.product_id }}</p>
 
 <div class="book-rating">
   <div class="stars">
@@ -53,6 +59,9 @@
         <strong>Stock:</strong>
         {% if selected_variant.is_in_stock %}In stock{% else %}Out of stock{% endif %}
       </p>
+    {% elif product.is_configurable and config_options %}
+      <p class="price">Price: <strong>From ${{ product.base_price }}</strong></p>
+      <p class="muted">Choose a value for each option to see the exact SKU, price, and stock status.</p>
     {% else %}
       <p class="price">Price: <strong>${{ product.base_price }}</strong></p>
       <p class="danger">No SKU configured.</p>
@@ -63,20 +72,38 @@
       <p>{{ product.description|linebreaksbr }}</p>
     </div>
 
-    {% if product.is_configurable and option %}
-      <div class="config-box">
-        <h3>Choose {{ option.name }}</h3>
-        <div class="option-buttons">
-          {% for value in option.values.all %}
-            <a class="pill {% if selected_variant and selected_variant.variant_values.first.option_value_id == value.id %}active{% endif %}"
-               href="{% url 'product_detail' product.slug %}?format={{ value.id }}">
-              {{ value.value }}
-              {% if value.price_delta > 0 %}(+${{ value.price_delta }}){% endif %}
-            </a>
-          {% endfor %}
-        </div>
-        <p class="muted small">Hardcover adds $5.00.</p>
+    {% if selected_preview_image %}
+      <div class="variant-preview">
+        <h3>Selected Option Preview</h3>
+        <img src="{{ selected_preview_image }}" alt="{{ product.title }}">
       </div>
+    {% endif %}
+
+    {% if product.is_configurable and config_options %}
+      <form method="get" class="config-box">
+        <h3>Choose Options</h3>
+        {% for option in config_options %}
+          <div class="admin-field">
+            <label for="option-{{ option.id }}">{{ option.name }}</label>
+            <select id="option-{{ option.id }}" name="option_{{ option.id }}" onchange="this.form.submit()">
+              <option value="">Choose {{ option.name }}</option>
+              {% for value in option.values %}
+                <option value="{{ value.id }}" {% if value.selected %}selected{% endif %}>
+                  {{ value.value }}{% if value.price_delta > 0 %} (+${{ value.price_delta }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endfor %}
+        <noscript>
+          <button type="submit">Update Configuration</button>
+        </noscript>
+        {% if not configuration_complete %}
+          <p class="muted small">Customers must choose a value for each option before this item can be added to the cart.</p>
+        {% elif not selected_variant %}
+          <p class="danger small">This option combination does not have a SKU configured yet.</p>
+        {% endif %}
+      </form>
     {% endif %}
 
     {% if user.is_authenticated %}
@@ -87,7 +114,7 @@
         {% endif %}
         <label>Quantity</label>
         <input type="number" name="quantity" value="1" min="1" max="99">
-        <button type="submit" {% if not selected_variant or not selected_variant.is_in_stock %}disabled{% endif %}>Add to Cart</button>
+        <button type="submit" {% if not selected_variant or not selected_variant.is_in_stock or product.is_configurable and not configuration_complete %}disabled{% endif %}>Add to Cart</button>
       </form>
     {% else %}
       <p><a href="{% url 'login' %}">Login</a> to add items to cart and place orders.</p>
@@ -103,7 +130,7 @@
             {% if product.slug %}
             <div class="card"> 
                 <a href="{% url 'product_detail' product.slug %}" class="card-image-wrap">
-                    <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/200x280?text=No+Image' }}" alt="{{ product.title }}" class="card-image">
+                    <img src="{{ product.primary_image_url }}" alt="{{ product.title }}" class="card-image">
                 </a>
                 <div class="card-body">
                     <h3 class="card-title"><a href="{% url 'product_detail' product.slug %}">{{ product.title|truncatechars:30 }}</a></h3>
@@ -181,6 +208,7 @@
     {% endif %}
   </div>
 </div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const slides = document.querySelectorAll('.carousel-slide');

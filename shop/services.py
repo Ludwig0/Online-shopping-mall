@@ -3,7 +3,7 @@ from email.mime import text
 from django.db import transaction
 from django.utils import timezone
 from numpy.ma import product
-from .models import Cart, CartItem, PurchaseOrder, PurchaseOrderItem, OrderStatusLog
+from .models import Cart, CartItem, CustomerProfile, PurchaseOrder, PurchaseOrderItem, OrderStatusLog
 import numpy as np
 
 def get_or_create_cart(user):
@@ -14,6 +14,17 @@ def get_or_create_cart(user):
 def generate_po_number():
     now = timezone.now()
     return f"PO{now.strftime('%Y%m%d%H%M%S%f')[-18:]}"
+
+
+def get_or_create_customer_profile(user):
+    profile, _ = CustomerProfile.objects.get_or_create(
+        user=user,
+        defaults={
+            'full_name': (user.get_full_name() or user.username).strip(),
+            'shipping_address': 'Address not provided',
+        }
+    )
+    return profile
 
 
 @transaction.atomic
@@ -27,7 +38,7 @@ def checkout_cart(user):
         if not item.variant.is_in_stock:
             raise ValueError(f"{item.variant.product.title} ({item.variant.config_summary}) is out of stock.")
 
-    profile = user.customer_profile
+    profile = get_or_create_customer_profile(user)
 
     order = PurchaseOrder.objects.create(
         po_number=generate_po_number(),
@@ -120,7 +131,6 @@ class Word2VecRecommendationService:
                 self.similarity_matrix = data.get('similarity_matrix')
                 self.product_vectors = data.get('product_vectors')
                 self.vector_size = data.get('vector_size', 100)
-                print(f"Loaded Word2Vec model with {len(self.product_ids)} products")
             except Exception as e:
                 print(f"Error loading model: {e}")
                 self.model = None
@@ -128,7 +138,7 @@ class Word2VecRecommendationService:
     def get_similar_products(self, product, top_k=5):
         """Get similar products based on Word2Vec semantic similarity"""
         if not self.model or not self.product_ids:
-            return self._get_fallback_recommendations(top_k)
+            return self._get_fallback_recommendations(top_k, exclude_product_id=product.id)
         
         try:
             # Find product index in the matrix
@@ -218,9 +228,11 @@ class Word2VecRecommendationService:
             is_active=True
         ).exclude(id=product.id)[:top_k])
     
-    def _get_fallback_recommendations(self, top_k=5):
+    def _get_fallback_recommendations(self, top_k=5, exclude_product_id=None):
         """Fallback: random products when no model available"""
         products = list(Product.objects.filter(is_active=True))
+        if exclude_product_id is not None:
+            products = [product for product in products if product.id != exclude_product_id]
         import random
         random.shuffle(products)
         return products[:top_k]

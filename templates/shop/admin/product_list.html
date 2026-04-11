@@ -9,7 +9,7 @@
 </div>
 
 <form method="get" class="search-row">
-  <input type="text" name="q" value="{{ q }}" placeholder="Search by title, product ID (slug), or SKU substring">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search by title, Product ID, or SKU substring">
   <button type="submit">Search</button>
 </form>
 
@@ -17,7 +17,7 @@
   <table class="table">
     <thead>
       <tr>
-        <th>Product ID (slug)</th>
+        <th>Product ID</th>
         <th>Title</th>
         <th>Base Price</th>
         <th>Configurable</th>
@@ -29,7 +29,7 @@
     <tbody>
     {% for p in products %}
       <tr>
-        <td>{{ p.slug }}</td>
+        <td>{{ p.product_id }}</td>
         <td>{{ p.title }}</td>
         <td>${{ p.base_price }}</td>
         <td>{{ p.is_configurable|yesno:"Yes,No" }}</td>

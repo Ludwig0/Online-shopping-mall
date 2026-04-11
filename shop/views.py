@@ -1,16 +1,30 @@
 from decimal import Decimal
+import json
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q, Avg, Count
+from django.db.models.deletion import ProtectedError
 from django.forms import inlineformset_factory
 from django.http import Http404
+from django.http import JsonResponse
+from django.http import StreamingHttpResponse
 from django.utils import timezone
 from .models import OrderStatusLog
 from django.shortcuts import get_object_or_404, redirect, render
 from .services import get_or_create_cart, checkout_cart, transition_order_status, Word2VecRecommendationService
+from .ai_chat import (
+    append_product_chat_turn,
+    clear_product_chat_history,
+    ensure_product_chat_intro,
+    get_or_create_product_chat_session,
+    serialize_product_chat_messages,
+    stream_product_chat_turn,
+)
 from .security import (
     clear_failed_logins,
     get_login_lockout_remaining,
@@ -24,6 +38,154 @@ from .models import (
     ProductVariantSelection, CartItem, PurchaseOrder, CustomerReview
 )
 from .services import get_or_create_cart, checkout_cart, transition_order_status
+
+def build_product_configuration_context(product, raw_selection):
+    options = list(product.options.prefetch_related('values').all())
+    selected_variant = None
+    selected_preview_image = ''
+    configuration_complete = False
+
+    if product.is_configurable and options:
+        selected_value_ids = []
+        config_options = []
+
+        for option in options:
+            selected_value = None
+            submitted_value = str(raw_selection.get(f'option_{option.id}', '')).strip()
+            if submitted_value.isdigit():
+                submitted_value_id = int(submitted_value)
+                selected_value = next(
+                    (value for value in option.values.all() if value.id == submitted_value_id),
+                    None,
+                )
+
+            option_values = []
+            for value in option.values.all():
+                is_selected = bool(selected_value and value.id == selected_value.id)
+                if is_selected and value.display_image_url and not selected_preview_image:
+                    selected_preview_image = value.display_image_url
+                option_values.append({
+                    'id': value.id,
+                    'value': value.value,
+                    'price_delta': value.price_delta,
+                    'display_image_url': value.display_image_url,
+                    'selected': is_selected,
+                })
+
+            if selected_value:
+                selected_value_ids.append(selected_value.id)
+
+            config_options.append({
+                'id': option.id,
+                'name': option.name,
+                'selected_value_id': selected_value.id if selected_value else None,
+                'values': option_values,
+            })
+
+        configuration_complete = len(selected_value_ids) == len(options)
+        if configuration_complete:
+            variants = product.variants.annotate(selection_count=Count('variant_values', distinct=True))
+            for value_id in selected_value_ids:
+                variants = variants.filter(variant_values__option_value_id=value_id)
+            selected_variant = variants.filter(selection_count=len(options)).distinct().first()
+
+        return {
+            'config_options': config_options,
+            'selected_variant': selected_variant,
+            'selected_preview_image': selected_preview_image,
+            'configuration_complete': configuration_complete,
+        }
+
+    selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
+    return {
+        'config_options': [],
+        'selected_variant': selected_variant,
+        'selected_preview_image': '',
+        'configuration_complete': bool(selected_variant),
+    }
+
+
+@transaction.atomic
+def save_product_configuration(product, options_data, variants_data):
+    existing_options = {
+        option.id: option
+        for option in product.options.prefetch_related('values').all()
+    }
+    option_ids_to_keep = set()
+    value_lookup = {}
+
+    for option_data in options_data:
+        option = existing_options.get(option_data['id'])
+        if option is None:
+            option = ProductOption(product=product)
+        option.name = option_data['name']
+        option.save()
+        option_ids_to_keep.add(option.id)
+
+        existing_values = {value.id: value for value in option.values.all()}
+        value_ids_to_keep = set()
+
+        for value_data in option_data['values']:
+            value = existing_values.get(value_data['id'])
+            if value is None:
+                value = ProductOptionValue(option=option)
+            value.value = value_data['value']
+            value.price_delta = value_data['price_delta']
+            value.display_image_url = value_data['display_image_url']
+            value.save()
+            value_ids_to_keep.add(value.id)
+            value_lookup[value_data['client_key']] = value
+
+        if value_ids_to_keep:
+            option.values.exclude(id__in=value_ids_to_keep).delete()
+        else:
+            option.values.all().delete()
+
+    if option_ids_to_keep:
+        product.options.exclude(id__in=option_ids_to_keep).delete()
+    else:
+        product.options.all().delete()
+
+    existing_variants = {
+        variant.id: variant
+        for variant in product.variants.prefetch_related('variant_values').all()
+    }
+    variant_ids_to_keep = set()
+
+    for variant_data in variants_data:
+        variant = existing_variants.get(variant_data['id'])
+        if variant is None:
+            variant = ProductVariant(product=product)
+
+        selected_values = [value_lookup[key] for key in variant_data['selection_keys']]
+        price_delta = sum((value.price_delta for value in selected_values), Decimal('0.00'))
+
+        variant.sku = variant_data['sku']
+        variant.price_delta = price_delta
+        variant.inventory_status = variant_data['inventory_status']
+        variant.is_default = variant_data['is_default']
+        variant.save()
+        variant_ids_to_keep.add(variant.id)
+
+        selected_value_ids = {value.id for value in selected_values}
+        selection_qs = ProductVariantSelection.objects.filter(variant=variant)
+        if selected_value_ids:
+            selection_qs.exclude(option_value_id__in=selected_value_ids).delete()
+        else:
+            selection_qs.delete()
+
+        for value in selected_values:
+            ProductVariantSelection.objects.get_or_create(variant=variant, option_value=value)
+
+    stale_variants = product.variants.exclude(id__in=variant_ids_to_keep)
+    if stale_variants.exists():
+        stale_variants.delete()
+
+    if product.variants.exists() and not product.variants.filter(is_default=True).exists():
+        first_variant = product.variants.order_by('id').first()
+        first_variant.is_default = True
+        first_variant.save(update_fields=['is_default'])
+
 
 def user_has_purchased_product(user, product):
     if not user.is_authenticated:
@@ -44,14 +206,25 @@ def product_list(request):
         
         products = products.annotate(
             relevance=Case(
-                When(title__icontains=q, then=Value(3)),
-                When(authors__icontains=q, then=Value(2)),
+                When(title__icontains=q, then=Value(5)),
+                When(slug__icontains=q, then=Value(4)),
+                When(variants__sku__icontains=q, then=Value(4)),
+                When(authors__icontains=q, then=Value(3)),
+                When(category__icontains=q, then=Value(2)),
                 When(publisher__icontains=q, then=Value(1)),
                 When(description__icontains=q, then=Value(1)),
                 default=Value(0),
                 output_field=IntegerField()
             )
-        ).filter(relevance__gt=0).order_by('-relevance', 'title')
+        ).filter(
+            Q(title__icontains=q) |
+            Q(slug__icontains=q) |
+            Q(variants__sku__icontains=q) |
+            Q(authors__icontains=q) |
+            Q(category__icontains=q) |
+            Q(publisher__icontains=q) |
+            Q(description__icontains=q)
+        ).distinct().order_by('-relevance', 'title')
         
     else:
         products = products.order_by('title')
@@ -89,20 +262,8 @@ def product_detail(request, slug):
         is_active=True
     )
 
-    selected_variant = None
-    selected_value_id = request.GET.get('format')
-    option = product.options.first()
-
-    if product.is_configurable and option:
-        if selected_value_id and selected_value_id.isdigit():
-            selected_variant = (
-                product.variants.filter(variant_values__option_value_id=int(selected_value_id))
-                .distinct().first()
-            )
-        if not selected_variant:
-            selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
-    else:
-        selected_variant = product.variants.filter(is_default=True).first() or product.variants.first()
+    config_context = build_product_configuration_context(product, request.GET)
+    selected_variant = config_context['selected_variant']
 
     can_review = user_has_purchased_product(request.user, product)
     existing_customer_review = None
@@ -133,7 +294,9 @@ def product_detail(request, slug):
     return render(request, 'shop/product_detail.html', {
         'product': product,
         'selected_variant': selected_variant,
-        'option': option,
+        'config_options': config_context['config_options'],
+        'selected_preview_image': config_context['selected_preview_image'],
+        'configuration_complete': config_context['configuration_complete'],
         'imported_reviews': imported_reviews,
         'customer_reviews': customer_reviews,
         'customer_avg_rating': customer_avg_rating,
@@ -143,6 +306,15 @@ def product_detail(request, slug):
         'review_form': review_form,
         'similar_products': similar_products,
     })
+
+
+def product_ai_chat_page(request, slug):
+    product = get_object_or_404(
+        Product.objects.prefetch_related('images'),
+        slug=slug,
+        is_active=True
+    )
+    return render(request, 'shop/product_ai_chat.html', {'product': product})
 
 @login_required
 def submit_product_review(request, product_id):
@@ -235,6 +407,9 @@ def add_to_cart(request, product_id):
     if variant_id:
         variant = get_object_or_404(ProductVariant, id=variant_id, product=product)
     else:
+        if product.is_configurable:
+            messages.error(request, "Please choose a value for each option before adding this product to your cart.")
+            return redirect('product_detail', slug=product.slug)
         variant = product.variants.filter(is_default=True).first() or product.variants.first()
 
     if not variant:
@@ -313,6 +488,84 @@ def checkout_view(request):
 
 
 @login_required
+def product_chat_history(request, slug):
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    product = get_object_or_404(Product, slug=slug, is_active=True)
+    try:
+        session = ensure_product_chat_intro(request.user, product)
+    except RuntimeError as exc:
+        return JsonResponse({'error': str(exc)}, status=503)
+
+    return JsonResponse({
+        'messages': serialize_product_chat_messages(session),
+    })
+
+
+@login_required
+def product_chat_send(request, slug):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    product = get_object_or_404(Product, slug=slug, is_active=True)
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid request payload.'}, status=400)
+
+    user_message = str(payload.get('message') or '').strip()
+    if not user_message:
+        return JsonResponse({'error': 'Message cannot be empty.'}, status=400)
+
+    try:
+        session, assistant_reply = append_product_chat_turn(request.user, product, user_message)
+    except RuntimeError as exc:
+        return JsonResponse({'error': str(exc)}, status=503)
+
+    return JsonResponse({
+        'reply': assistant_reply,
+        'messages': serialize_product_chat_messages(session),
+    })
+
+
+@login_required
+def product_chat_stream(request, slug):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    product = get_object_or_404(Product, slug=slug, is_active=True)
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid request payload.'}, status=400)
+
+    user_message = str(payload.get('message') or '').strip()
+    if not user_message:
+        return JsonResponse({'error': 'Message cannot be empty.'}, status=400)
+
+    try:
+        _, stream = stream_product_chat_turn(request.user, product, user_message)
+    except RuntimeError as exc:
+        return JsonResponse({'error': str(exc)}, status=503)
+
+    response = StreamingHttpResponse(stream, content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    response['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@login_required
+def product_chat_clear(request, slug):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed.'}, status=405)
+
+    product = get_object_or_404(Product, slug=slug, is_active=True)
+    clear_product_chat_history(request.user, product)
+    return JsonResponse({'ok': True})
+
+
+@login_required
 def order_list(request):
     status = request.GET.get('status', '').strip()
     orders = PurchaseOrder.objects.filter(customer=request.user).prefetch_related('items')
@@ -371,16 +624,39 @@ def admin_product_list(request):
 
 @portal_permissions_required('shop.add_product')
 def admin_product_create(request):
+    ImageFormSet = inlineformset_factory(Product, ProductImage, form=ProductImageForm, extra=3, can_delete=True)
+
     if request.method == 'POST':
         form = ProductForm(request.POST)
+        formset = ImageFormSet(request.POST, request.FILES)
         if form.is_valid():
-            product = form.save()
-            messages.success(request, "Product created.")
-            return redirect('admin_product_edit', product_id=product.id)
+            try:
+                with transaction.atomic():
+                    product = form.save()
+                    formset.instance = product
+                    if not formset.is_valid():
+                        raise ValidationError("Please fix the image entries before saving.")
+                    formset.save()
+                    save_product_configuration(
+                        product,
+                        form.cleaned_data['parsed_options'],
+                        form.cleaned_data['parsed_variants'],
+                    )
+            except (ValidationError, ProtectedError) as exc:
+                form.add_error(None, str(exc))
+            else:
+                messages.success(request, "Product created.")
+                return redirect('admin_product_edit', product_id=product.id)
     else:
         form = ProductForm()
+        formset = ImageFormSet()
 
-    return render(request, 'shop/admin/product_form.html', {'form': form, 'mode': 'Create'})
+    return render(request, 'shop/admin/product_form.html', {
+        'form': form,
+        'formset': formset,
+        'mode': 'Create',
+        'product': None,
+    })
 
 
 @portal_permissions_required('shop.change_product')
@@ -392,18 +668,24 @@ def admin_product_edit(request, product_id):
     if request.method == 'POST':
         if 'save_product' in request.POST:
             form = ProductForm(request.POST, instance=product)
-            formset = ImageFormSet(instance=product)
-            if form.is_valid():
-                form.save()
-                messages.success(request, "Product saved.")
-                return redirect('admin_product_edit', product_id=product.id)
-        elif 'save_images' in request.POST:
-            form = ProductForm(instance=product)
-            formset = ImageFormSet(request.POST, instance=product)
-            if formset.is_valid():
-                formset.save()
-                messages.success(request, "Images updated.")
-                return redirect('admin_product_edit', product_id=product.id)
+            formset = ImageFormSet(request.POST, request.FILES, instance=product)
+            if form.is_valid() and formset.is_valid():
+                try:
+                    with transaction.atomic():
+                        form.save()
+                        formset.save()
+                        save_product_configuration(
+                            product,
+                            form.cleaned_data['parsed_options'],
+                            form.cleaned_data['parsed_variants'],
+                        )
+                except (ValidationError, ProtectedError) as exc:
+                    form.add_error(None, str(exc))
+                else:
+                    messages.success(request, "Product saved.")
+                    return redirect('admin_product_edit', product_id=product.id)
+            elif form.is_valid():
+                pass
         else:
             form = ProductForm(instance=product)
             formset = ImageFormSet(instance=product)

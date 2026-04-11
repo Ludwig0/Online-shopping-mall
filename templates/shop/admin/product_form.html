@@ -1,26 +1,89 @@
 {% extends 'shop/base.html' %}
 {% block content %}
-<h1>Admin Portal — {{ mode }} Product</h1>
+<h1>Admin Portal - {{ mode }} Product</h1>
 
-<form method="post" class="form-card">
+<form method="post" enctype="multipart/form-data" class="form-card" id="product-editor-form">
   {% csrf_token %}
-  {{ form.as_p }}
-  <button type="submit" name="save_product">Save Product</button>
-</form>
+  {{ form.options_payload }}
+  {{ form.variants_payload }}
 
-{% if product %}
-  <h2>Images (Block B1: multiple photos)</h2>
-  <form method="post" class="form-card">
-    {% csrf_token %}
+  {% if form.non_field_errors %}
+    <div class="message error">
+      {{ form.non_field_errors }}
+    </div>
+  {% endif %}
+
+  <div class="builder-subcard">
+    <strong>Product ID:</strong>
+    {% if product %}
+      {{ product.product_id }}
+    {% else %}
+      Auto-generated after saving
+    {% endif %}
+  </div>
+
+  <div class="admin-form-grid">
+    {% for field in form.visible_fields %}
+      <div class="admin-field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}
+          <div class="muted small">{{ field.help_text }}</div>
+        {% endif %}
+        {% if field.errors %}
+          <div class="field-error">{{ field.errors }}</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="builder-section">
+    <div class="builder-header">
+      <div>
+        <h2>Options and Values</h2>
+        <p class="muted">Use this for configurable products. Each option needs at least one value, and each value can include a price delta and preview image.</p>
+      </div>
+      <button type="button" id="add-option-btn">Add Option</button>
+    </div>
+    <div id="options-builder"></div>
+  </div>
+
+  <div class="builder-section">
+    <div class="builder-header">
+      <div>
+        <h2>SKU Configuration</h2>
+        <p class="muted">Simple products must keep exactly one SKU. Configurable products need one SKU for each option combination you want to sell.</p>
+      </div>
+      <button type="button" id="add-variant-btn">Add SKU</button>
+    </div>
+    <div id="variants-builder"></div>
+    <p class="muted small">SKU price is calculated automatically from the selected option value price deltas.</p>
+  </div>
+
+  <div class="builder-section">
+    <div class="builder-header">
+      <div>
+        <h2>Images</h2>
+        <p class="muted">Add one or more product images during creation or editing.</p>
+      </div>
+    </div>
+    {% if formset.non_form_errors %}
+      <div class="message error">
+        {{ formset.non_form_errors }}
+      </div>
+    {% endif %}
     {{ formset.management_form }}
     {% for f in formset %}
       <div class="nested-form">
         {{ f.as_p }}
       </div>
     {% endfor %}
-    <button type="submit" name="save_images">Save Images</button>
-  </form>
+  </div>
 
+  <button type="submit" name="save_product">Save Product</button>
+</form>
+
+{% if product %}
   <h2>Configured SKUs</h2>
   <div class="table-wrap">
     <table class="table">
@@ -48,6 +111,441 @@
       </tbody>
     </table>
   </div>
-  <p class="muted">Variant creation is automated in the import command for dataset records.</p>
 {% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const optionsInput = document.getElementById('id_options_payload');
+  const variantsInput = document.getElementById('id_variants_payload');
+  const optionsBuilder = document.getElementById('options-builder');
+  const variantsBuilder = document.getElementById('variants-builder');
+  const addOptionBtn = document.getElementById('add-option-btn');
+  const addVariantBtn = document.getElementById('add-variant-btn');
+  const configurableCheckbox = document.getElementById('id_is_configurable');
+  let uniqueCounter = 0;
+
+  function nextKey(prefix) {
+    uniqueCounter += 1;
+    return prefix + '-' + Date.now() + '-' + uniqueCounter;
+  }
+
+  function parsePayload(input, fallback) {
+    try {
+      return JSON.parse(input.value || fallback);
+    } catch (error) {
+      return JSON.parse(fallback);
+    }
+  }
+
+  function normalizeOptions(rawOptions) {
+    return (rawOptions || []).map(function(option) {
+      return {
+        id: option.id || null,
+        client_key: option.client_key || nextKey('option'),
+        name: option.name || '',
+        values: (option.values || []).map(function(value) {
+          return {
+            id: value.id || null,
+            client_key: value.client_key || nextKey('value'),
+            value: value.value || '',
+            price_delta: value.price_delta || '0.00',
+            display_image_url: value.display_image_url || ''
+          };
+        })
+      };
+    });
+  }
+
+  function normalizeVariants(rawVariants) {
+    return (rawVariants || []).map(function(variant) {
+      return {
+        id: variant.id || null,
+        client_key: variant.client_key || nextKey('variant'),
+        sku: variant.sku || '',
+        inventory_status: variant.inventory_status || 'in_stock',
+        is_default: Boolean(variant.is_default),
+        selection_keys: Array.isArray(variant.selection_keys) ? variant.selection_keys.filter(Boolean) : []
+      };
+    });
+  }
+
+  let optionsState = normalizeOptions(parsePayload(optionsInput, '[]'));
+  let variantsState = normalizeVariants(parsePayload(variantsInput, '[]'));
+
+  if (!variantsState.length) {
+    variantsState.push({
+      id: null,
+      client_key: nextKey('variant'),
+      sku: '',
+      inventory_status: 'in_stock',
+      is_default: true,
+      selection_keys: []
+    });
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function syncVariantSelections() {
+    const validKeys = new Set();
+    optionsState.forEach(function(option) {
+      option.values.forEach(function(value) {
+        validKeys.add(value.client_key);
+      });
+    });
+
+    variantsState.forEach(function(variant) {
+      variant.selection_keys = variant.selection_keys.filter(function(key) {
+        return validKeys.has(key);
+      });
+    });
+  }
+
+  function setSingleDefault(targetKey) {
+    variantsState.forEach(function(variant) {
+      variant.is_default = variant.client_key === targetKey;
+    });
+  }
+
+  function updatePayloads() {
+    optionsInput.value = JSON.stringify(optionsState);
+    variantsInput.value = JSON.stringify(variantsState);
+  }
+
+  function renderOptions() {
+    if (!optionsState.length) {
+      optionsBuilder.innerHTML = '<p class="muted">No options added yet. Leave this empty for a simple product, or add at least one option for a configurable product.</p>';
+      return;
+    }
+
+    optionsBuilder.innerHTML = optionsState.map(function(option, optionIndex) {
+      const valuesHtml = option.values.map(function(value) {
+        return `
+          <div class="builder-subcard">
+            <div class="builder-inline-grid">
+              <div class="admin-field">
+                <label>Value</label>
+                <input type="text" value="${escapeHtml(value.value)}" data-role="value-name" data-option-key="${escapeHtml(option.client_key)}" data-value-key="${escapeHtml(value.client_key)}">
+              </div>
+              <div class="admin-field">
+                <label>Price Delta</label>
+                <input type="number" step="0.01" value="${escapeHtml(value.price_delta)}" data-role="value-price" data-option-key="${escapeHtml(option.client_key)}" data-value-key="${escapeHtml(value.client_key)}">
+              </div>
+              <div class="admin-field">
+                <label>Preview Image URL</label>
+                <input type="url" value="${escapeHtml(value.display_image_url)}" data-role="value-image" data-option-key="${escapeHtml(option.client_key)}" data-value-key="${escapeHtml(value.client_key)}">
+              </div>
+            </div>
+            <button type="button" class="danger-btn small-btn" data-action="remove-value" data-option-key="${escapeHtml(option.client_key)}" data-value-key="${escapeHtml(value.client_key)}">Remove Value</button>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="builder-card">
+          <div class="builder-header">
+            <div>
+              <h3>Option ${optionIndex + 1}</h3>
+              <p class="muted small">Examples: Format, Color, Size</p>
+            </div>
+            <button type="button" class="danger-btn small-btn" data-action="remove-option" data-option-key="${escapeHtml(option.client_key)}">Remove Option</button>
+          </div>
+          <div class="admin-field">
+            <label>Option Name</label>
+            <input type="text" value="${escapeHtml(option.name)}" data-role="option-name" data-option-key="${escapeHtml(option.client_key)}">
+          </div>
+          <div class="builder-stack">
+            ${valuesHtml || '<p class="muted">This option has no values yet.</p>'}
+          </div>
+          <button type="button" class="secondary-btn" data-action="add-value" data-option-key="${escapeHtml(option.client_key)}">Add Value</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderVariants() {
+    variantsBuilder.innerHTML = variantsState.map(function(variant, variantIndex) {
+      const selectionsHtml = optionsState.map(function(option) {
+        const selectedKey = variant.selection_keys.find(function(key) {
+          return option.values.some(function(value) { return value.client_key === key; });
+        }) || '';
+
+        const optionsHtml = option.values.map(function(value) {
+          const selectedAttr = selectedKey === value.client_key ? 'selected' : '';
+          const label = value.price_delta && value.price_delta !== '0.00'
+            ? `${value.value} (+$${value.price_delta})`
+            : value.value;
+          return `<option value="${escapeHtml(value.client_key)}" ${selectedAttr}>${escapeHtml(label)}</option>`;
+        }).join('');
+
+        return `
+          <div class="admin-field">
+            <label>${escapeHtml(option.name || 'Option')}</label>
+            <select data-role="variant-selection" data-variant-key="${escapeHtml(variant.client_key)}" data-option-key="${escapeHtml(option.client_key)}">
+              <option value="">Choose ${escapeHtml(option.name || 'value')}</option>
+              ${optionsHtml}
+            </select>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="builder-card">
+          <div class="builder-header">
+            <div>
+              <h3>SKU ${variantIndex + 1}</h3>
+              <p class="muted small">Set stock per SKU and map it to one full option combination.</p>
+            </div>
+            <button type="button" class="danger-btn small-btn" data-action="remove-variant" data-variant-key="${escapeHtml(variant.client_key)}">Remove SKU</button>
+          </div>
+          <div class="builder-inline-grid">
+            <div class="admin-field">
+              <label>SKU</label>
+              <input type="text" value="${escapeHtml(variant.sku)}" data-role="variant-sku" data-variant-key="${escapeHtml(variant.client_key)}">
+            </div>
+            <div class="admin-field">
+              <label>Inventory Status</label>
+              <select data-role="variant-stock" data-variant-key="${escapeHtml(variant.client_key)}">
+                <option value="in_stock" ${variant.inventory_status === 'in_stock' ? 'selected' : ''}>In stock</option>
+                <option value="out_of_stock" ${variant.inventory_status === 'out_of_stock' ? 'selected' : ''}>Out of stock</option>
+              </select>
+            </div>
+            <div class="admin-field checkbox-field">
+              <label>
+                <input type="checkbox" data-role="variant-default" data-variant-key="${escapeHtml(variant.client_key)}" ${variant.is_default ? 'checked' : ''}>
+                Default SKU
+              </label>
+            </div>
+          </div>
+          ${configurableCheckbox && configurableCheckbox.checked ? `
+            <div class="builder-inline-grid">
+              ${selectionsHtml || '<p class="muted">Add options first, then map this SKU to a value from each option.</p>'}
+            </div>
+          ` : '<p class="muted small">Simple product mode: this SKU will be used without option selections.</p>'}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderAll() {
+    syncVariantSelections();
+    updatePayloads();
+    renderOptions();
+    renderVariants();
+  }
+
+  addOptionBtn.addEventListener('click', function() {
+    optionsState.push({
+      id: null,
+      client_key: nextKey('option'),
+      name: '',
+      values: []
+    });
+    renderAll();
+  });
+
+  addVariantBtn.addEventListener('click', function() {
+    variantsState.push({
+      id: null,
+      client_key: nextKey('variant'),
+      sku: '',
+      inventory_status: 'in_stock',
+      is_default: variantsState.length === 0,
+      selection_keys: []
+    });
+    renderAll();
+  });
+
+  optionsBuilder.addEventListener('click', function(event) {
+    const action = event.target.dataset.action;
+    if (!action) {
+      return;
+    }
+
+    if (action === 'add-value') {
+      const option = optionsState.find(function(item) {
+        return item.client_key === event.target.dataset.optionKey;
+      });
+      if (!option) {
+        return;
+      }
+      option.values.push({
+        id: null,
+        client_key: nextKey('value'),
+        value: '',
+        price_delta: '0.00',
+        display_image_url: ''
+      });
+    }
+
+    if (action === 'remove-option') {
+      optionsState = optionsState.filter(function(option) {
+        return option.client_key !== event.target.dataset.optionKey;
+      });
+    }
+
+    if (action === 'remove-value') {
+      optionsState = optionsState.map(function(option) {
+        if (option.client_key !== event.target.dataset.optionKey) {
+          return option;
+        }
+        option.values = option.values.filter(function(value) {
+          return value.client_key !== event.target.dataset.valueKey;
+        });
+        return option;
+      });
+    }
+
+    renderAll();
+  });
+
+  optionsBuilder.addEventListener('input', function(event) {
+    const role = event.target.dataset.role;
+    if (!role) {
+      return;
+    }
+
+    const option = optionsState.find(function(item) {
+      return item.client_key === event.target.dataset.optionKey;
+    });
+    if (!option) {
+      return;
+    }
+
+    if (role === 'option-name') {
+      option.name = event.target.value;
+    } else {
+      const value = option.values.find(function(item) {
+        return item.client_key === event.target.dataset.valueKey;
+      });
+      if (!value) {
+        return;
+      }
+      if (role === 'value-name') {
+        value.value = event.target.value;
+      }
+      if (role === 'value-price') {
+        value.price_delta = event.target.value || '0.00';
+      }
+      if (role === 'value-image') {
+        value.display_image_url = event.target.value;
+      }
+    }
+
+    updatePayloads();
+    renderVariants();
+  });
+
+  variantsBuilder.addEventListener('click', function(event) {
+    const action = event.target.dataset.action;
+    if (action !== 'remove-variant') {
+      return;
+    }
+
+    variantsState = variantsState.filter(function(variant) {
+      return variant.client_key !== event.target.dataset.variantKey;
+    });
+
+    if (!variantsState.length) {
+      variantsState.push({
+        id: null,
+        client_key: nextKey('variant'),
+        sku: '',
+        inventory_status: 'in_stock',
+        is_default: true,
+        selection_keys: []
+      });
+    }
+
+    if (!variantsState.some(function(variant) { return variant.is_default; })) {
+      variantsState[0].is_default = true;
+    }
+
+    renderAll();
+  });
+
+  variantsBuilder.addEventListener('input', function(event) {
+    const role = event.target.dataset.role;
+    if (!role) {
+      return;
+    }
+
+    const variant = variantsState.find(function(item) {
+      return item.client_key === event.target.dataset.variantKey;
+    });
+    if (!variant) {
+      return;
+    }
+
+    if (role === 'variant-sku') {
+      variant.sku = event.target.value;
+    }
+
+    if (role === 'variant-default') {
+      if (event.target.checked) {
+        setSingleDefault(variant.client_key);
+      } else if (!variantsState.some(function(item) { return item.is_default && item.client_key !== variant.client_key; })) {
+        event.target.checked = true;
+        setSingleDefault(variant.client_key);
+      } else {
+        variant.is_default = false;
+      }
+      renderVariants();
+    }
+
+    updatePayloads();
+  });
+
+  variantsBuilder.addEventListener('change', function(event) {
+    const role = event.target.dataset.role;
+    if (!role) {
+      return;
+    }
+
+    const variant = variantsState.find(function(item) {
+      return item.client_key === event.target.dataset.variantKey;
+    });
+    if (!variant) {
+      return;
+    }
+
+    if (role === 'variant-stock') {
+      variant.inventory_status = event.target.value;
+    }
+
+    if (role === 'variant-selection') {
+      const option = optionsState.find(function(item) {
+        return item.client_key === event.target.dataset.optionKey;
+      });
+      const valueKeysInOption = new Set((option ? option.values : []).map(function(value) {
+        return value.client_key;
+      }));
+
+      variant.selection_keys = variant.selection_keys.filter(function(key) {
+        return !valueKeysInOption.has(key);
+      });
+
+      if (event.target.value) {
+        variant.selection_keys.push(event.target.value);
+      }
+    }
+
+    updatePayloads();
+  });
+
+  if (configurableCheckbox) {
+    configurableCheckbox.addEventListener('change', function() {
+      renderVariants();
+    });
+  }
+
+  renderAll();
+});
+</script>
 {% endblock %}

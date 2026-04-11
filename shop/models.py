@@ -15,7 +15,7 @@ class CustomerProfile(models.Model):
 
 class Product(models.Model):
     title = models.CharField(max_length=255, db_index=True)
-    slug = models.SlugField(max_length=300, unique=True)
+    slug = models.SlugField(max_length=8, unique=True, editable=False, null=True, blank=True)
     description = models.TextField(blank=True)
     authors = models.CharField(max_length=500, blank=True)
     publisher = models.CharField(max_length=255, blank=True)
@@ -46,6 +46,22 @@ class Product(models.Model):
     def __str__(self):
         return self.title
 
+    @staticmethod
+    def format_product_id(product_pk):
+        return f"{product_pk:08d}"
+
+    @property
+    def product_id(self):
+        return self.slug
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        expected_product_id = self.format_product_id(self.pk)
+        if self.slug != expected_product_id:
+            type(self).objects.filter(pk=self.pk).update(slug=expected_product_id)
+            self.slug = expected_product_id
+
     @property
     def display_price(self):
         default_variant = self.variants.filter(is_default=True).first()
@@ -53,10 +69,22 @@ class Product(models.Model):
             return default_variant.effective_price
         return self.base_price
 
+    @property
+    def primary_image_url(self):
+        if self.thumbnail_url:
+            return self.thumbnail_url
+
+        first_image = self.images.order_by('sort_order', 'id').first()
+        if first_image and first_image.effective_image_url:
+            return first_image.effective_image_url
+
+        return 'https://via.placeholder.com/200x280?text=No+Image'
+
 
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    image_url = models.URLField(max_length=1000)
+    image_url = models.URLField(max_length=1000, blank=True)
+    image_file = models.FileField(upload_to='product_images/', blank=True)
     alt_text = models.CharField(max_length=255, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
 
@@ -65,6 +93,12 @@ class ProductImage(models.Model):
 
     def __str__(self):
         return f"{self.product.title} image {self.id}"
+
+    @property
+    def effective_image_url(self):
+        if self.image_file:
+            return self.image_file.url
+        return self.image_url
 
 
 class ProductOption(models.Model):
@@ -264,4 +298,39 @@ class CustomerReview(models.Model):
 
     def __str__(self):
         return f"{self.product.title} - {self.user.username} ({self.rating})"
+
+
+class ProductChatSession(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='product_chat_sessions')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='chat_sessions')
+    intro_generated = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at', '-id']
+        unique_together = ('user', 'product')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.product.title}"
+
+
+class ProductChatMessage(models.Model):
+    ROLE_USER = 'user'
+    ROLE_ASSISTANT = 'assistant'
+    ROLE_CHOICES = [
+        (ROLE_USER, 'User'),
+        (ROLE_ASSISTANT, 'Assistant'),
+    ]
+
+    session = models.ForeignKey(ProductChatSession, on_delete=models.CASCADE, related_name='messages')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return f"{self.session} - {self.role}"
 

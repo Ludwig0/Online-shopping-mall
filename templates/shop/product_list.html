@@ -9,7 +9,7 @@
             {% if product.slug %}
             <div class="card"> 
                 <a href="{% url 'product_detail' product.slug %}" class="card-image-wrap">
-                    <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/200x280?text=No+Image' }}" alt="{{ product.title }}" class="card-image">
+                    <img src="{{ product.primary_image_url }}" alt="{{ product.title }}" class="card-image">
                 </a>
                 <div class="card-body">
                     <h3 class="card-title"><a href="{% url 'product_detail' product.slug %}">{{ product.title|truncatechars:30 }}</a></h3>
@@ -32,7 +32,7 @@
   {% for product in page_obj.object_list %}
     <div class="card">
       <a href="{% url 'product_detail' product.slug %}" class="card-image-wrap">
-        <img src="{{ product.thumbnail_url|default:'https://via.placeholder.com/200x280?text=No+Image' }}" alt="{{ product.title }}" class="card-image">
+        <img src="{{ product.primary_image_url }}" alt="{{ product.title }}" class="card-image">
       </a>
       <div class="card-body">
         <h3 class="card-title"><a href="{% url 'product_detail' product.slug %}">{{ product.title }}</a></h3>
