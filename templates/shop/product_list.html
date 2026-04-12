@@ -1,6 +1,6 @@
 {% extends 'shop/base.html' %}
 {% block content %}
-{% if bestsellers %}
+{% if bestsellers and not request.GET.q %}
 <div class="recommendation-section">
     <h2>🏆Top Rated</h2>
     <div class="scroll-container">
